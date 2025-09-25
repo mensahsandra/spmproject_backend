@@ -91,6 +91,15 @@ router.post(
     }
 );
 
+// Helpful GET for /api/auth/login (avoid confusing 404 when probing in browser)
+router.get('/login', (req, res) => {
+    res.status(405).json({
+        ok: false,
+        error: 'method_not_allowed',
+        message: 'Use POST with JSON body { email, password, studentId? } to login'
+    });
+});
+
 // @route   POST /api/auth/register
 // @desc    Register user
 // @access  Public

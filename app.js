@@ -10,6 +10,15 @@ const { apiLimiter, authLimiter, attendanceLimiter } = require('./middleware/rat
 
 const app = express();
 
+// Normalize accidental double /api/api prefix (defensive safety net for clients
+// that already include /api in their base URL while also appending /api/* paths)
+app.use((req, res, next) => {
+    if (req.url.startsWith('/api/api/')) {
+        req.url = req.url.replace(/^\/api\/api\//, '/api/');
+    }
+    next();
+});
+
 // Request ID + start time
 app.use((req, res, next) => {
     req.id = crypto.randomUUID();
@@ -144,15 +153,8 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-// 404 handler (after routes, before error handler)
-app.use((req, res, next) => {
-    if (res.headersSent) return next();
-    logger.warn('route.not_found', { id: req.id, method: req.method, url: req.originalUrl });
-    res.status(404).json({ ok: false, error: 'not_found', message: 'Route not found' });
-});
-
-// Version / build metadata
-app.get('/api/version', (req, res) => {
+// Version / build metadata (must be BEFORE 404 handler)
+app.get(['/api/version','/version'], (req, res) => {
     let pkg = {};
     try { pkg = require('./package.json'); } catch {}
     const commit = process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT || null;
@@ -165,6 +167,13 @@ app.get('/api/version', (req, res) => {
         env: process.env.NODE_ENV,
         time: new Date().toISOString()
     });
+});
+
+// 404 handler (after routes, before error handler)
+app.use((req, res, next) => {
+    if (res.headersSent) return next();
+    logger.warn('route.not_found', { id: req.id, method: req.method, url: req.originalUrl });
+    res.status(404).json({ ok: false, error: 'not_found', message: 'Route not found' });
 });
 
 // Unified error handler
