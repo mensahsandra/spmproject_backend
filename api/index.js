@@ -16,8 +16,11 @@ async function ensureDb() {
 }
 
 module.exports = async (req, res) => {
-  // Ensure Express sees /api/* routes as defined in app.js
-  if (!req.url.startsWith('/api/')) {
+  // Ensure Express sees /api/* routes as defined in app.js.
+  // Only prefix if the path doesn't already start with /api (covers /api and /api/*).
+  if (!req.url.startsWith('/api')) {
+    // Normalise leading slash
+    if (!req.url.startsWith('/')) req.url = '/' + req.url;
     req.url = '/api' + req.url;
   }
 
