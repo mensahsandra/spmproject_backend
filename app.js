@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require('mongoose');
 const morgan = require("morgan");
+const { apiLimiter, authLimiter, attendanceLimiter } = require('./middleware/rateLimit');
 
 const app = express();
 
@@ -70,6 +71,8 @@ app.use(cors({
     credentials: true
 }));
 app.use(express.json());
+// Global rate limiter (light)
+app.use(apiLimiter);
 app.use(morgan("dev"));
 
 // Debug middleware to log all requests
@@ -78,9 +81,9 @@ app.use((req, res, next) => {
     next();
 });
 
-// Routes
-app.use("/api/auth", require("./routes/auth"));
-app.use("/api/attendance", require("./routes/attendance"));
+// Routes with targeted rate limiting
+app.use("/api/auth", authLimiter, require("./routes/auth"));
+app.use("/api/attendance", attendanceLimiter, require("./routes/attendance"));
 app.use("/api/grades", require("./routes/grades"));
 app.use("/api/cwa", require("./routes/cwa"));
 app.use("/api/deadlines", require("./routes/deadlines"));
@@ -101,6 +104,22 @@ app.get('/api/health', (req, res) => {
         service: 'spm-backend', 
         time: new Date().toISOString(), 
         dbState: mongoose.connection?.readyState 
+    });
+});
+
+// Version / build metadata
+app.get('/api/version', (req, res) => {
+    let pkg = {};
+    try { pkg = require('./package.json'); } catch {}
+    const commit = process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT || null;
+    res.json({
+        ok: true,
+        name: pkg.name,
+        version: pkg.version,
+        commit,
+        node: process.version,
+        env: process.env.NODE_ENV,
+        time: new Date().toISOString()
     });
 });
 
