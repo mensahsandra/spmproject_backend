@@ -1,0 +1,44 @@
+config/.env
+*.env
+node_modules
+.vercel
+*.log
+
+# Node modules
+node_modules/
+
+# Environment variables
+.env
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# IDEs and editors
+.vscode/
+.idea/
+
+# Build and cache
+dist/
+build/
+.cache/
+.tmp/
+
+# File uploads or exports
+uploads/
+exports/
+*.csv
+*.xlsx
+
+# Optional: Coverage or testing files
+coverage/
+
+# dotenv backup
+.env.local
+.env.test
+.env.production
