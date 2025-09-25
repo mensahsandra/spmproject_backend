@@ -79,6 +79,10 @@ const allowedOrigins = new Set([
     'http://127.0.0.1:5185'
 ]);
 
+// Add deployed frontend origin explicitly (Vercel)
+allowedOrigins.add('https://spmproject-web.vercel.app');
+allowedOrigins.add('https://www.spmproject-web.vercel.app');
+
 app.use(cors({
     origin: (origin, callback) => {
         if (!origin) return callback(null, true); // non-browser or same-origin
@@ -88,7 +92,7 @@ app.use(cors({
             /^http:\/\/127\.0\.0\.1:[5][0-9]{3}$/.test(origin)) {
             return callback(null, true);
         }
-        console.warn('CORS blocked origin:', origin);
+    console.warn('CORS blocked origin:', origin, { allowedSample: Array.from(allowedOrigins).slice(0,5) });
         return callback(new Error('Not allowed by CORS'));
     },
     credentials: true
