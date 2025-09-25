@@ -5,6 +5,7 @@ Express + Mongoose API for attendance, grades, CWA, deadlines.
 ## Endpoints
 - GET /api/health — service + DB status
 - GET /api/version — build/version metadata (name, version, commit, time)
+- GET /api/status — combined health + version metadata
 - POST /api/attendance/check-in — student attendance
 - POST /api/attendance/generate-session — lecturer QR session
 - GET /api/attendance/logs — lecturer logs
@@ -57,3 +58,27 @@ Content-Type: application/json
 
 ---
 # spm-backend
+
+## Logging
+Structured JSON logs via `utils/logger.js` with fields: level, msg, time, and contextual metadata (request id, durationMs, etc.). Each request gets an `X-Request-ID` header.
+
+Events:
+- request.start
+- request.body (debug keys only)
+- request.complete
+- route.not_found
+- error.unhandled
+
+## Unified errors
+All errors follow shape:
+```
+{
+  ok: false,
+  error: "error_code",
+  message: "Human readable message"
+}
+```
+404 returns `{ ok:false, error:'not_found', message:'Route not found' }`.
+
+## Framework preset (Vercel)
+Use "Other" as Framework Preset. (This is a plain Express API served via serverless function.)

@@ -4,13 +4,27 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require('mongoose');
 const morgan = require("morgan");
+const crypto = require('crypto');
+const logger = require('./utils/logger');
 const { apiLimiter, authLimiter, attendanceLimiter } = require('./middleware/rateLimit');
 
 const app = express();
 
-// Debug middleware for incoming requests
+// Request ID + start time
 app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+    req.id = crypto.randomUUID();
+    req.startHr = process.hrtime.bigint();
+    res.setHeader('X-Request-ID', req.id);
+    next();
+});
+
+// Request logging (minimal; body logged separately below)
+app.use((req, res, next) => {
+    logger.info('request.start', { id: req.id, method: req.method, url: req.url, ip: req.ip });
+    res.on('finish', () => {
+        const durationMs = Number(process.hrtime.bigint() - req.startHr) / 1e6;
+        logger.info('request.complete', { id: req.id, status: res.statusCode, durationMs: +durationMs.toFixed(2) });
+    });
     next();
 });
 
@@ -75,9 +89,11 @@ app.use(express.json());
 app.use(apiLimiter);
 app.use(morgan("dev"));
 
-// Debug middleware to log all requests
+// Body logging (omit for large payloads)
 app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url} - Body:`, req.body);
+    if (req.body && Object.keys(req.body).length) {
+        logger.debug('request.body', { id: req.id, bodyKeys: Object.keys(req.body) });
+    }
     next();
 });
 
@@ -98,13 +114,36 @@ app.get("/", (req, res) => {
 
 // Health for clients
 app.get('/api/health', (req, res) => {
-    res.json({ 
-        ok: true, 
+    res.json({
+        ok: true,
         status: "ok",
-        service: 'spm-backend', 
-        time: new Date().toISOString(), 
-        dbState: mongoose.connection?.readyState 
+        service: 'spm-backend',
+        time: new Date().toISOString(),
+        dbState: mongoose.connection?.readyState
     });
+});
+
+app.get('/api/status', (req, res) => {
+    let pkg = {};
+    try { pkg = require('./package.json'); } catch {}
+    const commit = process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT || null;
+    res.json({
+        ok: true,
+        service: 'spm-backend',
+        status: 'ok',
+        time: new Date().toISOString(),
+        dbState: mongoose.connection?.readyState,
+        version: pkg.version,
+        name: pkg.name,
+        commit
+    });
+});
+
+// 404 handler (after routes, before error handler)
+app.use((req, res, next) => {
+    if (res.headersSent) return next();
+    logger.warn('route.not_found', { id: req.id, method: req.method, url: req.originalUrl });
+    res.status(404).json({ ok: false, error: 'not_found', message: 'Route not found' });
 });
 
 // Version / build metadata
@@ -123,11 +162,13 @@ app.get('/api/version', (req, res) => {
     });
 });
 
-// Error handler to prevent generic 500 without details
+// Unified error handler
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-    console.error('Unhandled error:', err);
-    res.status(500).json({ success: false, message: 'Server error', error: String(err?.message || err) });
+    const status = err.status || err.statusCode || 500;
+    const code = err.code || 'internal_error';
+    logger.error('error.unhandled', { id: req.id, status, code, message: err.message, stack: process.env.NODE_ENV === 'production' ? undefined : err.stack });
+    res.status(status).json({ ok: false, error: code, message: err.message || 'Server error' });
 });
 
 module.exports = app;
