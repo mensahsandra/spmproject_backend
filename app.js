@@ -138,7 +138,7 @@ app.get('/api/health', (req, res) => {
 
 // /api root convenience info
 app.get('/api', (req, res) => {
-    res.json({ ok: true, service: 'spm-backend', message: 'API root', endpoints: ['/api/auth/login','/api/status','/api/version','/api/health'] });
+    res.json({ ok: true, service: 'spm-backend', message: 'API root', endpoints: ['/api/auth/login','/api/auth/add-test-users','/api/status','/api/version','/api/health'] });
 });
 
 app.get('/api/status', (req, res) => {

@@ -31,6 +31,7 @@ router.post(
 
         const user = await User.findOne({ email: email.toLowerCase() }).lean();
         if (!user) {
+                console.warn('login.user_not_found', { email: email.toLowerCase() });
                 return res.status(400).json({
                     success: false,
                     message: "Invalid credentials",
@@ -39,6 +40,7 @@ router.post(
 
         const isMatch = await bcrypt.compare(password, user.password);
             if (!isMatch) {
+                console.warn('login.password_mismatch', { email: email.toLowerCase() });
                 return res.status(400).json({
                     success: false,
                     message: "Invalid credentials",
@@ -46,6 +48,7 @@ router.post(
             }
 
         if (user.role === "student" && suppliedId && user.studentId && user.studentId !== suppliedId) {
+                console.warn('login.student_id_mismatch', { email: email.toLowerCase(), suppliedId, expected: user.studentId });
                 return res.status(400).json({
                     success: false,
                     message: "Invalid student ID",
@@ -250,6 +253,11 @@ router.post("/add-test-users", async (req, res) => {
             error: String(error?.message || error)
         });
     }
+});
+
+// Helpful GET to indicate seeding endpoint usage (so a browser visit is informative)
+router.get('/add-test-users', (req, res) => {
+    res.status(405).json({ ok: false, error: 'method_not_allowed', message: 'Use POST to /api/auth/add-test-users to (re)seed test users' });
 });
 
 module.exports = router;
