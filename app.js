@@ -113,7 +113,10 @@ app.use((req, res, next) => {
 // Routes with targeted rate limiting
 app.use("/api/auth", authLimiter, require("./routes/auth"));
 app.use("/api/attendance", attendanceLimiter, require("./routes/attendance"));
+// Existing basic grades routes
 app.use("/api/grades", require("./routes/grades"));
+// Additional lecturer tools (enrolled, bulk-update)
+app.use("/api/grades", require("./routes/grades_v2"));
 app.use("/api/cwa", require("./routes/cwa"));
 app.use("/api/deadlines", require("./routes/deadlines"));
 
