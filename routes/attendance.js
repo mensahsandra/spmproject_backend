@@ -4,6 +4,7 @@ const { Parser } = require('json2csv');
 const router = express.Router();
 const mongoose = require('mongoose');
 const { AttendanceSession, AttendanceLog } = require('../models/Attendance');
+const AttendanceRecordService = require('../services/attendanceRecordService');
 const auth = require('../middleware/auth');
 
 // In-memory stores fallback if DB not connected
@@ -117,19 +118,11 @@ router.get('/logs', auth(['lecturer','admin']), async (req, res) => {
             }
         }
         if (usingDb) {
-            const filter = {};
-            if (courseCode) filter.courseCode = String(courseCode);
-            if (sessionCode) filter.sessionCode = String(sessionCode);
-            if (start && end) filter.timestamp = { $gte: start, $lt: end };
+            const { records, total } = await AttendanceRecordService.getLogs({ courseCode, sessionCode, date, filterType, page, limit });
             const pageNum = Math.max(1, parseInt(page));
             const lim = Math.min(100, Math.max(1, parseInt(limit)));
-            const skip = (pageNum - 1) * lim;
-            const [logs, total] = await Promise.all([
-                AttendanceLog.find(filter).sort({ timestamp: -1 }).skip(skip).limit(lim).lean(),
-                AttendanceLog.countDocuments(filter)
-            ]);
             const totalPages = Math.ceil(total / lim) || 1;
-            return res.json({ ok: true, count: logs.length, total, page: pageNum, totalPages, limit: lim, logs, persisted: true });
+            return res.json({ ok: true, count: records.length, total, page: pageNum, totalPages, limit: lim, logs: records, persisted: true });
         } else {
             let result = attendanceLogsMem;
             if (courseCode) result = result.filter(r => (r.courseCode || '') === String(courseCode));
@@ -182,11 +175,8 @@ router.get('/export', auth(['lecturer','admin']), async (req, res) => {
         }
         let result;
         if (usingDb) {
-            const filter = {};
-            if (courseCode) filter.courseCode = String(courseCode);
-            if (sessionCode) filter.sessionCode = String(sessionCode);
-            if (start && end) filter.timestamp = { $gte: start, $lt: end };
-            result = await AttendanceLog.find(filter).lean();
+            const { records } = await AttendanceRecordService.getLogs({ courseCode, sessionCode, date, filterType, page: 1, limit: 100000 });
+            result = records;
         } else {
             result = attendanceLogsMem;
             if (courseCode) result = result.filter(r => (r.courseCode || '') === String(courseCode));
