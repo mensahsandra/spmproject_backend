@@ -41,6 +41,9 @@ class AttendanceRecordService {
     const pipeline = [
       { $match: match },
       { $sort: { timestamp: -1, createdAt: -1 } },
+      // Join user to get student name
+      { $lookup: { from: 'users', localField: 'studentId', foreignField: 'studentId', as: 'student' } },
+      { $addFields: { studentName: { $arrayElemAt: ['$student.name', 0] } } },
       {
         $facet: {
           data: [
@@ -51,6 +54,7 @@ class AttendanceRecordService {
                 _id: 0,
                 timestamp: '$timestamp',
                 studentId: '$studentId',
+                studentName: '$studentName',
                 centre: '$centre',
                 courseCode: '$courseCode',
                 courseName: '$courseName',

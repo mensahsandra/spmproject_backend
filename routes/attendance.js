@@ -186,7 +186,7 @@ router.get('/export', auth(['lecturer','admin']), async (req, res) => {
                 return !isNaN(t.getTime()) && t >= start && t < end;
             });
         }
-        const fields = ['timestamp','studentId','centre','courseCode','courseName','lecturer','sessionCode'];
+        const fields = ['timestamp','studentId','studentName','centre','courseCode','courseName','lecturer','sessionCode'];
         const parser = new Parser({ fields });
         const csv = parser.parse(result);
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');

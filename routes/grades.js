@@ -1,6 +1,7 @@
 const express = require('express');
 const { Parser } = require('json2csv');
 const router = express.Router();
+const auth = require('../middleware/auth');
 
 // In-memory grades store for demo
 // Structure: { courseCode, studentId, score, grade, updatedAt }
@@ -18,14 +19,14 @@ router.get('/', (req, res) => {
 });
 
 // Lecturer: list grades (optionally filter by courseCode)
-router.get('/list', (req, res) => {
+router.get('/list', auth(['lecturer','admin']), (req, res) => {
     const { courseCode } = req.query || {};
     const list = courseCode ? gradeStore.filter(g => g.courseCode === String(courseCode)) : gradeStore;
     res.json({ ok: true, count: list.length, grades: list });
 });
 
 // Lecturer: update or upsert a grade
-router.post('/update', (req, res) => {
+router.post('/update', auth(['lecturer','admin']), (req, res) => {
     const { courseCode, studentId, score, grade } = req.body || {};
     if (!courseCode || !studentId) {
         return res.status(400).json({ ok: false, message: 'courseCode and studentId are required' });
@@ -37,7 +38,7 @@ router.post('/update', (req, res) => {
 });
 
 // Lecturer: export CSV
-router.get('/export', (req, res) => {
+router.get('/export', auth(['lecturer','admin']), (req, res) => {
     const { courseCode } = req.query || {};
     const list = courseCode ? gradeStore.filter(g => g.courseCode === String(courseCode)) : gradeStore;
     const fields = ['updatedAt','courseCode','studentId','score','grade'];

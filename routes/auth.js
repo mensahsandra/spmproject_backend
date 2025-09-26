@@ -255,6 +255,32 @@ router.post("/add-test-users", async (req, res) => {
     }
 });
 
+// Seed a few students with course assignments (for grades enrolled endpoint)
+router.post('/add-sample-students', async (req, res) => {
+    try {
+        const salt = await bcrypt.genSalt(10);
+        const pw = await bcrypt.hash('password0!', salt);
+        const samples = [
+            { email: 'stud1@knust.edu.gh', password: pw, name: 'Student One', role: 'student', studentId: 'S1001', course: 'BIT364' },
+            { email: 'stud2@knust.edu.gh', password: pw, name: 'Student Two', role: 'student', studentId: 'S1002', course: 'BIT364' },
+            { email: 'stud3@knust.edu.gh', password: pw, name: 'Student Three', role: 'student', studentId: 'S1003', course: 'BIT364' },
+        ];
+        const results = [];
+        for (const s of samples) {
+            const r = await User.findOneAndUpdate(
+                { email: s.email },
+                s,
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+            );
+            results.push({ email: r.email, studentId: r.studentId, course: r.course });
+        }
+        res.json({ ok: true, created: results.length, students: results });
+    } catch (error) {
+        console.error('add-sample-students error:', error);
+        res.status(500).json({ ok: false, message: 'Server error', error: String(error?.message || error) });
+    }
+});
+
 // Helpful GET to indicate seeding endpoint usage (so a browser visit is informative)
 router.get('/add-test-users', (req, res) => {
     res.status(405).json({ ok: false, error: 'method_not_allowed', message: 'Use POST to /api/auth/add-test-users to (re)seed test users' });
