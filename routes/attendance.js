@@ -90,13 +90,37 @@ router.post('/generate-session', auth(['lecturer','admin']), async (req, res) =>
 
 // Lecturer: list attendance logs (optionally filter)
 router.get('/logs', auth(['lecturer','admin']), async (req, res) => {
-    const { courseCode, sessionCode, page = 1, limit = 25 } = req.query || {};
+    const { courseCode, sessionCode, page = 1, limit = 25, date = '', filterType = 'day' } = req.query || {};
     const usingDb = mongoose.connection?.readyState === 1;
     try {
+        // Optional date window
+        let start = null, end = null;
+        if (date) {
+            const base = new Date(String(date));
+            if (!isNaN(base.getTime())) {
+                const s = new Date(base);
+                const e = new Date(base);
+                if (String(filterType) === 'week') {
+                    const d = s.getDay();
+                    const diffToMonday = (d + 6) % 7;
+                    s.setDate(s.getDate() - diffToMonday);
+                    e.setDate(s.getDate() + 7);
+                } else if (String(filterType) === 'month') {
+                    s.setDate(1);
+                    e.setMonth(s.getMonth() + 1);
+                    e.setDate(1);
+                } else {
+                    // day (default)
+                    e.setDate(e.getDate() + 1);
+                }
+                start = s; end = e;
+            }
+        }
         if (usingDb) {
             const filter = {};
             if (courseCode) filter.courseCode = String(courseCode);
             if (sessionCode) filter.sessionCode = String(sessionCode);
+            if (start && end) filter.timestamp = { $gte: start, $lt: end };
             const pageNum = Math.max(1, parseInt(page));
             const lim = Math.min(100, Math.max(1, parseInt(limit)));
             const skip = (pageNum - 1) * lim;
@@ -110,6 +134,10 @@ router.get('/logs', auth(['lecturer','admin']), async (req, res) => {
             let result = attendanceLogsMem;
             if (courseCode) result = result.filter(r => (r.courseCode || '') === String(courseCode));
             if (sessionCode) result = result.filter(r => (r.sessionCode || '') === String(sessionCode));
+            if (start && end) result = result.filter(r => {
+                const t = new Date(r.timestamp);
+                return !isNaN(t.getTime()) && t >= start && t < end;
+            });
             // Simple memory pagination
             const pageNum = Math.max(1, parseInt(page));
             const lim = Math.min(100, Math.max(1, parseInt(limit)));
@@ -127,24 +155,51 @@ router.get('/logs', auth(['lecturer','admin']), async (req, res) => {
 
 // Lecturer: export CSV of attendance logs
 router.get('/export', auth(['lecturer','admin']), async (req, res) => {
-    const { courseCode, sessionCode } = req.query || {};
+    const { courseCode, sessionCode, date = '', filterType = 'day' } = req.query || {};
     const usingDb = mongoose.connection?.readyState === 1;
     try {
+        // Date window
+        let start = null, end = null;
+        if (date) {
+            const base = new Date(String(date));
+            if (!isNaN(base.getTime())) {
+                const s = new Date(base);
+                const e = new Date(base);
+                if (String(filterType) === 'week') {
+                    const d = s.getDay();
+                    const diffToMonday = (d + 6) % 7;
+                    s.setDate(s.getDate() - diffToMonday);
+                    e.setDate(s.getDate() + 7);
+                } else if (String(filterType) === 'month') {
+                    s.setDate(1);
+                    e.setMonth(s.getMonth() + 1);
+                    e.setDate(1);
+                } else {
+                    e.setDate(e.getDate() + 1);
+                }
+                start = s; end = e;
+            }
+        }
         let result;
         if (usingDb) {
             const filter = {};
             if (courseCode) filter.courseCode = String(courseCode);
             if (sessionCode) filter.sessionCode = String(sessionCode);
+            if (start && end) filter.timestamp = { $gte: start, $lt: end };
             result = await AttendanceLog.find(filter).lean();
         } else {
             result = attendanceLogsMem;
             if (courseCode) result = result.filter(r => (r.courseCode || '') === String(courseCode));
             if (sessionCode) result = result.filter(r => (r.sessionCode || '') === String(sessionCode));
+            if (start && end) result = result.filter(r => {
+                const t = new Date(r.timestamp);
+                return !isNaN(t.getTime()) && t >= start && t < end;
+            });
         }
         const fields = ['timestamp','studentId','centre','courseCode','courseName','lecturer','sessionCode'];
         const parser = new Parser({ fields });
         const csv = parser.parse(result);
-        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="attendance_export_${Date.now()}.csv"`);
         res.send(csv);
     } catch (e) {
