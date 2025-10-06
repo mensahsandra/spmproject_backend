@@ -82,17 +82,28 @@ const allowedOrigins = new Set([
 // Add deployed frontend origin explicitly (Vercel)
 allowedOrigins.add('https://spmproject-web.vercel.app');
 allowedOrigins.add('https://www.spmproject-web.vercel.app');
+// Add your current Vercel deployment domains
+allowedOrigins.add('https://spmproject-cyzvi2552-mensahsandras-projects.vercel.app');
+allowedOrigins.add('https://spmproject-2lby7r6jk-mensahandras-projects.vercel.app');
 
 app.use(cors({
     origin: (origin, callback) => {
         if (!origin) return callback(null, true); // non-browser or same-origin
+
         // Accept any localhost or 127.0.0.1 with port in 5000-5999 range
-        if (allowedOrigins.has(origin) || 
-            /^http:\/\/localhost:[5][0-9]{3}$/.test(origin) || 
+        if (allowedOrigins.has(origin) ||
+            /^http:\/\/localhost:[5][0-9]{3}$/.test(origin) ||
             /^http:\/\/127\.0\.0\.1:[5][0-9]{3}$/.test(origin)) {
             return callback(null, true);
         }
-    console.warn('CORS blocked origin:', origin, { allowedSample: Array.from(allowedOrigins).slice(0,5) });
+
+        // Accept any Vercel deployment subdomain for your project
+        // Matches: spmproject-*.vercel.app, spmproject*.vercel.app, spmproject-*-*.vercel.app
+        if (/^https:\/\/spmproject[^.]*\.vercel\.app$/.test(origin)) {
+            return callback(null, true);
+        }
+
+        console.warn('CORS blocked origin:', origin, { allowedSample: Array.from(allowedOrigins).slice(0, 5) });
         return callback(new Error('Not allowed by CORS'));
     },
     credentials: true
@@ -117,6 +128,8 @@ app.use("/api/attendance", attendanceLimiter, require("./routes/attendance"));
 app.use("/api/grades", require("./routes/grades"));
 // Additional lecturer tools (enrolled, bulk-update)
 app.use("/api/grades", require("./routes/grades_v2"));
+// Assessment routes (alias for grades)
+app.use("/api/assessments", require("./routes/grades"));
 app.use("/api/cwa", require("./routes/cwa"));
 app.use("/api/deadlines", require("./routes/deadlines"));
 
@@ -141,12 +154,12 @@ app.get('/api/health', (req, res) => {
 
 // /api root convenience info
 app.get('/api', (req, res) => {
-    res.json({ ok: true, service: 'spm-backend', message: 'API root', endpoints: ['/api/auth/login','/api/auth/add-test-users','/api/status','/api/version','/api/health'] });
+    res.json({ ok: true, service: 'spm-backend', message: 'API root', endpoints: ['/api/auth/login', '/api/auth/add-test-users', '/api/status', '/api/version', '/api/health'] });
 });
 
 app.get('/api/status', (req, res) => {
     let pkg = {};
-    try { pkg = require('./package.json'); } catch {}
+    try { pkg = require('./package.json'); } catch { }
     const commit = process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT || null;
     res.json({
         ok: true,
@@ -161,9 +174,9 @@ app.get('/api/status', (req, res) => {
 });
 
 // Version / build metadata (must be BEFORE 404 handler)
-app.get(['/api/version','/version'], (req, res) => {
+app.get(['/api/version', '/version'], (req, res) => {
     let pkg = {};
-    try { pkg = require('./package.json'); } catch {}
+    try { pkg = require('./package.json'); } catch { }
     const commit = process.env.VERCEL_GIT_COMMIT_SHA || process.env.GIT_COMMIT || null;
     res.json({
         ok: true,

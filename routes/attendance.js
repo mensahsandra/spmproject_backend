@@ -29,37 +29,110 @@ router.get('/checkin', (req, res) => {
 // QR-based check-in (preferred)
 router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) => {
     const { studentId, qrCode, sessionCode: bodySessionCode, timestamp, centre, location } = req.body || {};
+    
+    // Validate required fields
     if (!studentId || (!qrCode && !bodySessionCode)) {
         return res.status(400).json({ ok: false, message: 'studentId and qrCode or sessionCode are required' });
     }
+    
+    // Only allow students to check in (security measure)
+    if (req.user.role !== 'student' && req.user.role !== 'admin') {
+        return res.status(403).json({ ok: false, message: 'Only students can check in to attendance' });
+    }
+    
     let parsed = null;
     try { parsed = qrCode ? JSON.parse(qrCode) : null; } catch {}
     const sessionCode = bodySessionCode || parsed?.sessionCode || parsed?.qrCode || qrCode;
+    
+    // Verify session exists and is still active
+    const usingDb = mongoose.connection?.readyState === 1;
+    let session = null;
+    
+    if (usingDb) {
+        session = await AttendanceSession.findOne({ sessionCode }).lean();
+    } else {
+        session = sessionsMem.find(s => s.sessionCode === sessionCode);
+    }
+    
+    if (!session) {
+        return res.status(404).json({ ok: false, message: 'Invalid session code' });
+    }
+    
+    // Check if session has expired
+    const now = new Date();
+    const expiresAt = new Date(session.expiresAt);
+    if (now > expiresAt) {
+        return res.status(400).json({ ok: false, message: 'Session has expired' });
+    }
+    
     const nowIso = timestamp || new Date().toISOString();
+    
+    // Enhanced entry with student information from auth
     const baseEntry = {
-        studentId,
+        studentId: studentId || req.user.studentId,
+        studentName: req.user.name || 'Unknown Student',
         sessionCode,
         qrRaw: qrCode || null,
-        courseCode: parsed?.courseCode || null,
-        courseName: parsed?.course || parsed?.courseName || null,
-        lecturer: parsed?.lecturer || parsed?.lecturerName || null,
-        centre: centre || null,
+        courseCode: parsed?.courseCode || session.courseCode,
+        courseName: parsed?.course || parsed?.courseName || session.courseName,
+        lecturer: parsed?.lecturer || parsed?.lecturerName || session.lecturer,
+        centre: centre || req.user.centre || 'Not specified',
         location: location || null,
         timestamp: nowIso,
+        checkInMethod: qrCode ? 'QR_SCAN' : 'MANUAL_CODE'
     };
-    const usingDb = mongoose.connection?.readyState === 1;
+    
     try {
         if (usingDb) {
-            const created = await AttendanceLog.findOneAndUpdate(
-                { sessionCode, studentId },
-                baseEntry,
-                { upsert: true, new: true, setDefaultsOnInsert: true }
-            );
-            return res.json({ ok: true, message: 'Attendance marked', persisted: true, log: created });
+            // Check if student already checked in for this session
+            const existing = await AttendanceLog.findOne({ sessionCode, studentId: baseEntry.studentId });
+            if (existing) {
+                return res.json({ 
+                    ok: true, 
+                    message: 'Already checked in for this session', 
+                    alreadyCheckedIn: true,
+                    checkInTime: existing.timestamp,
+                    log: existing 
+                });
+            }
+            
+            const created = await AttendanceLog.create(baseEntry);
+            return res.json({ 
+                ok: true, 
+                message: 'Attendance marked successfully', 
+                persisted: true, 
+                log: created,
+                session: {
+                    courseCode: session.courseCode,
+                    courseName: session.courseName,
+                    lecturer: session.lecturer
+                }
+            });
         } else {
-            const exists = attendanceLogsMem.find(l => l.sessionCode === sessionCode && l.studentId === studentId);
-            if (!exists) attendanceLogsMem.push({ id: Date.now().toString(36), ...baseEntry });
-            return res.json({ ok: true, message: 'Attendance marked (memory)', persisted: false, log: exists || baseEntry });
+            const exists = attendanceLogsMem.find(l => l.sessionCode === sessionCode && l.studentId === baseEntry.studentId);
+            if (exists) {
+                return res.json({ 
+                    ok: true, 
+                    message: 'Already checked in for this session', 
+                    alreadyCheckedIn: true,
+                    checkInTime: exists.timestamp,
+                    log: exists 
+                });
+            }
+            
+            const newEntry = { id: Date.now().toString(36), ...baseEntry };
+            attendanceLogsMem.push(newEntry);
+            return res.json({ 
+                ok: true, 
+                message: 'Attendance marked successfully (memory)', 
+                persisted: false, 
+                log: newEntry,
+                session: {
+                    courseCode: session.courseCode,
+                    courseName: session.courseName,
+                    lecturer: session.lecturer
+                }
+            });
         }
     } catch (e) {
         console.error('check-in error:', e);
@@ -67,29 +140,545 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
     }
 });
 
+// Check if lecturer has active session (prevent multiple generations)
+router.get('/active-session', auth(['lecturer','admin']), async (req, res) => {
+    try {
+        const lecturerId = req.user.id;
+        const now = new Date();
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        let activeSession = null;
+        if (usingDb) {
+            activeSession = await AttendanceSession.findOne({
+                lecturer: req.user.name,
+                expiresAt: { $gt: now }
+            }).lean();
+        } else {
+            activeSession = sessionsMem.find(s => 
+                s.lecturer === req.user.name && new Date(s.expiresAt) > now
+            );
+        }
+        
+        if (activeSession) {
+            const remainingSeconds = Math.max(0, Math.floor((new Date(activeSession.expiresAt).getTime() - now.getTime()) / 1000));
+            return res.json({
+                ok: true,
+                hasActiveSession: true,
+                session: {
+                    ...activeSession,
+                    remainingSeconds,
+                    issuedAt: activeSession.issuedAt.toISOString ? activeSession.issuedAt.toISOString() : activeSession.issuedAt,
+                    expiresAt: activeSession.expiresAt.toISOString ? activeSession.expiresAt.toISOString() : activeSession.expiresAt
+                }
+            });
+        }
+        
+        res.json({ ok: true, hasActiveSession: false });
+    } catch (e) {
+        console.error('active-session check error:', e);
+        res.status(500).json({ ok: false, message: 'Failed to check active session', error: String(e?.message || e) });
+    }
+});
+
 // Lecturer: generate a session code and QR image
 router.post('/generate-session', auth(['lecturer','admin']), async (req, res) => {
     try {
-        const { courseCode = 'BIT364', courseName = 'Entrepreneurship', lecturer = 'Prof. Anyimadu', durationMinutes = 30 } = req.body || {};
+        const { courseCode = 'BIT364', courseName = 'Entrepreneurship', lecturer, durationMinutes = 30 } = req.body || {};
+        
+        // Check if lecturer already has an active session
+        const lecturerName = lecturer || req.user?.name || 'Prof. Anyimadu';
+        const now = new Date();
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        let existingSession = null;
+        if (usingDb) {
+            existingSession = await AttendanceSession.findOne({
+                lecturer: lecturerName,
+                expiresAt: { $gt: now }
+            }).lean();
+        } else {
+            existingSession = sessionsMem.find(s => 
+                s.lecturer === lecturerName && new Date(s.expiresAt) > now
+            );
+        }
+        
+        if (existingSession) {
+            const remainingSeconds = Math.max(0, Math.floor((new Date(existingSession.expiresAt).getTime() - now.getTime()) / 1000));
+            return res.status(400).json({
+                ok: false,
+                message: 'You already have an active session. Please wait for it to expire.',
+                activeSession: {
+                    sessionCode: existingSession.sessionCode,
+                    remainingSeconds,
+                    expiresAt: existingSession.expiresAt
+                }
+            });
+        }
+        
         const sessionCode = randomCode(6) + '-' + randomCode(6);
         const issuedAt = new Date();
         const expiresAt = new Date(issuedAt.getTime() + durationMinutes * 60000);
-        const payload = { sessionCode, courseCode, courseName, lecturer, issuedAt, expiresAt };
-        const qrDataUrl = await QRCode.toDataURL(JSON.stringify({ ...payload, issuedAt: issuedAt.toISOString(), expiresAt: expiresAt.toISOString() }), { errorCorrectionLevel: 'M' });
-        const usingDb = mongoose.connection?.readyState === 1;
+        
+        // Create payload for QR code
+        const qrPayload = { 
+            sessionCode, 
+            courseCode, 
+            courseName, 
+            lecturer: lecturerName, 
+            issuedAt: issuedAt.toISOString(), 
+            expiresAt: expiresAt.toISOString() 
+        };
+        
+        // Generate QR code with higher quality for better scanning
+        const qrDataUrl = await QRCode.toDataURL(JSON.stringify(qrPayload), { 
+            errorCorrectionLevel: 'M',
+            width: 300,
+            margin: 2
+        });
+        
+        // Database payload
+        const dbPayload = { sessionCode, courseCode, courseName, lecturer: lecturerName, issuedAt, expiresAt };
+        
         if (usingDb) {
-            await AttendanceSession.create(payload);
+            await AttendanceSession.create(dbPayload);
         } else {
-            sessionsMem.push(payload);
+            sessionsMem.push(dbPayload);
         }
-        res.json({ ok: true, sessionCode, qrDataUrl, issuedAt: issuedAt.toISOString(), expiresAt: expiresAt.toISOString(), persisted: usingDb });
+        
+        // Enhanced response for in-place QR display
+        res.json({ 
+            ok: true, 
+            success: true,
+            message: 'Session generated successfully',
+            session: {
+                sessionCode,
+                courseCode,
+                courseName,
+                lecturer: lecturerName,
+                durationMinutes: parseInt(durationMinutes),
+                issuedAt: issuedAt.toISOString(),
+                expiresAt: expiresAt.toISOString(),
+                remainingSeconds: Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000))
+            },
+            qrCode: {
+                dataUrl: qrDataUrl,
+                size: 300,
+                format: 'PNG'
+            },
+            persisted: usingDb 
+        });
     } catch (e) {
         console.error('generate-session error:', e);
         res.status(500).json({ ok: false, message: 'Failed to generate session', error: String(e?.message || e) });
     }
 });
 
-// Lecturer: list attendance logs (optionally filter)
+// Alternative endpoint for marking attendance (simpler interface)
+router.post('/mark', auth(['student','lecturer','admin']), async (req, res) => {
+    const { sessionCode, studentId, timestamp } = req.body || {};
+    
+    // Validate required fields
+    if (!sessionCode) {
+        return res.status(400).json({ ok: false, message: 'sessionCode is required' });
+    }
+    
+    // Only allow students to mark attendance (security measure)
+    if (req.user.role !== 'student' && req.user.role !== 'admin') {
+        return res.status(403).json({ ok: false, message: 'Only students can mark attendance' });
+    }
+    
+    // Use authenticated student's ID if not provided
+    const actualStudentId = studentId || req.user.studentId;
+    if (!actualStudentId) {
+        return res.status(400).json({ ok: false, message: 'Student ID not found' });
+    }
+    
+    // Verify session exists and is still active
+    const usingDb = mongoose.connection?.readyState === 1;
+    let session = null;
+    
+    if (usingDb) {
+        session = await AttendanceSession.findOne({ sessionCode }).lean();
+    } else {
+        session = sessionsMem.find(s => s.sessionCode === sessionCode);
+    }
+    
+    if (!session) {
+        return res.status(404).json({ ok: false, message: 'Invalid session code' });
+    }
+    
+    // Check if session has expired
+    const now = new Date();
+    const expiresAt = new Date(session.expiresAt);
+    if (now > expiresAt) {
+        return res.status(400).json({ 
+            ok: false, 
+            message: 'Session has expired',
+            expiredAt: session.expiresAt
+        });
+    }
+    
+    const nowIso = timestamp || new Date().toISOString();
+    
+    // Create attendance entry
+    const attendanceEntry = {
+        studentId: actualStudentId,
+        studentName: req.user.name || 'Unknown Student',
+        sessionCode,
+        courseCode: session.courseCode,
+        courseName: session.courseName,
+        lecturer: session.lecturer,
+        centre: req.user.centre || 'Not specified',
+        timestamp: nowIso,
+        checkInMethod: 'MANUAL_CODE'
+    };
+    
+    try {
+        if (usingDb) {
+            // Check if student already checked in for this session
+            const existing = await AttendanceLog.findOne({ 
+                sessionCode, 
+                studentId: actualStudentId 
+            });
+            
+            if (existing) {
+                return res.json({ 
+                    ok: true, 
+                    message: 'Already marked attendance for this session', 
+                    alreadyMarked: true,
+                    checkInTime: existing.timestamp,
+                    attendance: existing 
+                });
+            }
+            
+            const created = await AttendanceLog.create(attendanceEntry);
+            return res.json({ 
+                ok: true, 
+                message: 'Attendance marked successfully', 
+                persisted: true, 
+                attendance: created,
+                session: {
+                    courseCode: session.courseCode,
+                    courseName: session.courseName,
+                    lecturer: session.lecturer
+                }
+            });
+        } else {
+            const exists = attendanceLogsMem.find(l => 
+                l.sessionCode === sessionCode && l.studentId === actualStudentId
+            );
+            
+            if (exists) {
+                return res.json({ 
+                    ok: true, 
+                    message: 'Already marked attendance for this session', 
+                    alreadyMarked: true,
+                    checkInTime: exists.timestamp,
+                    attendance: exists 
+                });
+            }
+            
+            const newEntry = { id: Date.now().toString(36), ...attendanceEntry };
+            attendanceLogsMem.push(newEntry);
+            return res.json({ 
+                ok: true, 
+                message: 'Attendance marked successfully (memory)', 
+                persisted: false, 
+                attendance: newEntry,
+                session: {
+                    courseCode: session.courseCode,
+                    courseName: session.courseName,
+                    lecturer: session.lecturer
+                }
+            });
+        }
+    } catch (e) {
+        console.error('mark attendance error:', e);
+        return res.status(500).json({ 
+            ok: false, 
+            message: 'Failed to mark attendance', 
+            error: String(e?.message || e) 
+        });
+    }
+});
+
+// Validate session code (for students to check if session is valid)
+router.get('/session/:sessionCode', async (req, res) => {
+    try {
+        const { sessionCode } = req.params;
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        let session = null;
+        if (usingDb) {
+            session = await AttendanceSession.findOne({ sessionCode }).lean();
+        } else {
+            session = sessionsMem.find(s => s.sessionCode === sessionCode);
+        }
+        
+        if (!session) {
+            return res.status(404).json({ 
+                ok: false, 
+                message: 'Session not found',
+                valid: false
+            });
+        }
+        
+        const now = new Date();
+        const expiresAt = new Date(session.expiresAt);
+        const isExpired = now >= expiresAt;
+        const remainingSeconds = Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / 1000));
+        
+        res.json({
+            ok: true,
+            valid: !isExpired,
+            session: {
+                sessionCode: session.sessionCode,
+                courseCode: session.courseCode,
+                courseName: session.courseName,
+                lecturer: session.lecturer,
+                issuedAt: session.issuedAt,
+                expiresAt: session.expiresAt,
+                isExpired,
+                remainingSeconds
+            }
+        });
+    } catch (e) {
+        console.error('session validation error:', e);
+        res.status(500).json({ 
+            ok: false, 
+            message: 'Failed to validate session', 
+            error: String(e?.message || e) 
+        });
+    }
+});
+
+// Get attendance records for a specific lecturer
+router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res) => {
+    try {
+        const { lecturerId } = req.params;
+        const { limit = 50, sessionCode, date } = req.query || {};
+        
+        // Security: ensure lecturer can only access their own data (unless admin)
+        if (req.user.role !== 'admin' && req.user.id !== lecturerId && req.user.name !== lecturerId) {
+            return res.status(403).json({ 
+                ok: false, 
+                message: 'Access denied. Can only view your own attendance records.' 
+            });
+        }
+        
+        const usingDb = mongoose.connection?.readyState === 1;
+        let attendanceRecords = [];
+        
+        if (usingDb) {
+            // Find sessions by lecturer name or ID
+            const sessions = await AttendanceSession.find({
+                $or: [
+                    { lecturer: lecturerId },
+                    { lecturer: req.user.name }
+                ]
+            }).lean();
+            
+            const sessionCodes = sessions.map(s => s.sessionCode);
+            
+            // Get attendance logs for these sessions
+            let query = { sessionCode: { $in: sessionCodes } };
+            if (sessionCode) query.sessionCode = sessionCode;
+            if (date) {
+                const startDate = new Date(date);
+                const endDate = new Date(startDate);
+                endDate.setDate(endDate.getDate() + 1);
+                query.timestamp = { $gte: startDate.toISOString(), $lt: endDate.toISOString() };
+            }
+            
+            attendanceRecords = await AttendanceLog.find(query)
+                .sort({ timestamp: -1 })
+                .limit(parseInt(limit))
+                .lean();
+        } else {
+            // Memory-based lookup
+            const lecturerSessions = sessionsMem.filter(s => 
+                s.lecturer === lecturerId || s.lecturer === req.user.name
+            );
+            const sessionCodes = lecturerSessions.map(s => s.sessionCode);
+            
+            attendanceRecords = attendanceLogsMem.filter(l => 
+                sessionCodes.includes(l.sessionCode)
+            ).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+            .slice(0, parseInt(limit));
+        }
+        
+        res.json({
+            ok: true,
+            lecturerId,
+            count: attendanceRecords.length,
+            records: attendanceRecords.map(record => ({
+                id: record._id || record.id,
+                studentId: record.studentId,
+                studentName: record.studentName,
+                sessionCode: record.sessionCode,
+                courseCode: record.courseCode,
+                courseName: record.courseName,
+                centre: record.centre,
+                timestamp: record.timestamp,
+                checkInTime: new Date(record.timestamp).toLocaleTimeString(),
+                checkInDate: new Date(record.timestamp).toLocaleDateString()
+            })),
+            persisted: usingDb
+        });
+    } catch (e) {
+        console.error('lecturer attendance records error:', e);
+        res.status(500).json({ 
+            ok: false, 
+            message: 'Failed to fetch attendance records', 
+            error: String(e?.message || e) 
+        });
+    }
+});
+
+// Get session status (for real-time timer updates)
+router.get('/session/:sessionCode/status', auth(['lecturer','admin']), async (req, res) => {
+    try {
+        const { sessionCode } = req.params;
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        let session = null;
+        if (usingDb) {
+            session = await AttendanceSession.findOne({ sessionCode }).lean();
+        } else {
+            session = sessionsMem.find(s => s.sessionCode === sessionCode);
+        }
+        
+        if (!session) {
+            return res.status(404).json({ ok: false, message: 'Session not found' });
+        }
+        
+        const now = new Date();
+        const expiresAt = new Date(session.expiresAt);
+        const isExpired = now >= expiresAt;
+        const remainingSeconds = Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / 1000));
+        const remainingMinutes = Math.floor(remainingSeconds / 60);
+        const remainingSecondsDisplay = remainingSeconds % 60;
+        
+        res.json({
+            ok: true,
+            session: {
+                sessionCode: session.sessionCode,
+                courseCode: session.courseCode,
+                courseName: session.courseName,
+                lecturer: session.lecturer,
+                issuedAt: session.issuedAt,
+                expiresAt: session.expiresAt,
+                isExpired,
+                remainingSeconds,
+                remainingTime: {
+                    minutes: remainingMinutes,
+                    seconds: remainingSecondsDisplay,
+                    display: `${remainingMinutes}:${remainingSecondsDisplay.toString().padStart(2, '0')}`
+                }
+            }
+        });
+    } catch (e) {
+        console.error('session status error:', e);
+        res.status(500).json({ ok: false, message: 'Failed to get session status', error: String(e?.message || e) });
+    }
+});
+
+// Lecturer: get structured attendance data for attendance page
+router.get('/lecturer-dashboard', auth(['lecturer','admin']), async (req, res) => {
+    try {
+        const lecturerName = req.user?.name || 'Unknown Lecturer';
+        const { courseCode, sessionCode, date = '', limit = 50 } = req.query || {};
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        // Get lecturer's recent sessions
+        let sessions = [];
+        let attendanceLogs = [];
+        
+        if (usingDb) {
+            // Get recent sessions by this lecturer
+            sessions = await AttendanceSession.find({ 
+                lecturer: lecturerName 
+            }).sort({ issuedAt: -1 }).limit(10).lean();
+            
+            // Get attendance logs for these sessions
+            const sessionCodes = sessions.map(s => s.sessionCode);
+            attendanceLogs = await AttendanceLog.find({
+                sessionCode: { $in: sessionCodes }
+            }).sort({ timestamp: -1 }).limit(parseInt(limit)).lean();
+        } else {
+            sessions = sessionsMem.filter(s => s.lecturer === lecturerName)
+                .sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt))
+                .slice(0, 10);
+            
+            const sessionCodes = sessions.map(s => s.sessionCode);
+            attendanceLogs = attendanceLogsMem.filter(l => sessionCodes.includes(l.sessionCode))
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                .slice(0, parseInt(limit));
+        }
+        
+        // Get current active session
+        const now = new Date();
+        const activeSession = sessions.find(s => new Date(s.expiresAt) > now);
+        
+        // Structure the response for the attendance page
+        const courseInfo = sessions.length > 0 ? {
+            courseCode: sessions[0].courseCode || 'N/A',
+            courseName: sessions[0].courseName || 'N/A',
+            lecturer: lecturerName,
+            classRepresentative: 'To be assigned' // This could be enhanced later
+        } : null;
+        
+        // Group attendance by session for better display
+        const attendanceBySession = {};
+        attendanceLogs.forEach(log => {
+            if (!attendanceBySession[log.sessionCode]) {
+                const session = sessions.find(s => s.sessionCode === log.sessionCode);
+                attendanceBySession[log.sessionCode] = {
+                    sessionInfo: session || { sessionCode: log.sessionCode, courseCode: log.courseCode, courseName: log.courseName },
+                    attendees: []
+                };
+            }
+            attendanceBySession[log.sessionCode].attendees.push({
+                studentId: log.studentId,
+                studentName: log.studentName || 'Unknown Student',
+                centre: log.centre || 'Not specified',
+                timestamp: log.timestamp,
+                checkInTime: new Date(log.timestamp).toLocaleTimeString()
+            });
+        });
+        
+        res.json({
+            ok: true,
+            lecturer: {
+                name: lecturerName,
+                email: req.user?.email || 'N/A',
+                staffId: req.user?.staffId || 'N/A'
+            },
+            courseInfo,
+            activeSession: activeSession ? {
+                sessionCode: activeSession.sessionCode,
+                courseCode: activeSession.courseCode,
+                courseName: activeSession.courseName,
+                issuedAt: activeSession.issuedAt,
+                expiresAt: activeSession.expiresAt,
+                remainingSeconds: Math.max(0, Math.floor((new Date(activeSession.expiresAt).getTime() - now.getTime()) / 1000))
+            } : null,
+            recentSessions: sessions.slice(0, 5),
+            attendanceBySession,
+            totalAttendanceToday: attendanceLogs.filter(log => {
+                const logDate = new Date(log.timestamp).toDateString();
+                const today = new Date().toDateString();
+                return logDate === today;
+            }).length,
+            persisted: usingDb
+        });
+    } catch (e) {
+        console.error('lecturer dashboard error:', e);
+        res.status(500).json({ ok: false, message: 'Failed to fetch lecturer dashboard data', error: String(e?.message || e) });
+    }
+});
+
+// Lecturer: list attendance logs (optionally filter) - Legacy endpoint
 router.get('/logs', auth(['lecturer','admin']), async (req, res) => {
     const { courseCode, sessionCode, page = 1, limit = 25, date = '', filterType = 'day' } = req.query || {};
     const usingDb = mongoose.connection?.readyState === 1;
@@ -134,8 +723,8 @@ router.get('/logs', auth(['lecturer','admin']), async (req, res) => {
             // Simple memory pagination
             const pageNum = Math.max(1, parseInt(page));
             const lim = Math.min(100, Math.max(1, parseInt(limit)));
-            const start = (pageNum - 1) * lim;
-            const sliced = result.slice(start, start + lim);
+            const startIdx = (pageNum - 1) * lim;
+            const sliced = result.slice(startIdx, startIdx + lim);
             const total = result.length;
             const totalPages = Math.ceil(total / lim) || 1;
             return res.json({ ok: true, count: sliced.length, total, page: pageNum, totalPages, limit: lim, logs: sliced, persisted: false });
@@ -146,55 +735,408 @@ router.get('/logs', auth(['lecturer','admin']), async (req, res) => {
     }
 });
 
-// Lecturer: export CSV of attendance logs
-router.get('/export', auth(['lecturer','admin']), async (req, res) => {
-    const { courseCode, sessionCode, date = '', filterType = 'day' } = req.query || {};
-    const usingDb = mongoose.connection?.readyState === 1;
+// Real-time attendance updates for lecturer (WebSocket alternative)
+router.get('/live-attendance/:sessionCode', auth(['lecturer','admin']), async (req, res) => {
     try {
-        // Date window
+        const { sessionCode } = req.params;
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        // Verify session belongs to this lecturer
+        let session = null;
+        if (usingDb) {
+            session = await AttendanceSession.findOne({ sessionCode }).lean();
+        } else {
+            session = sessionsMem.find(s => s.sessionCode === sessionCode);
+        }
+        
+        if (!session) {
+            return res.status(404).json({ ok: false, message: 'Session not found' });
+        }
+        
+        // Security check - ensure lecturer owns this session
+        if (req.user.role !== 'admin' && session.lecturer !== req.user.name) {
+            return res.status(403).json({ ok: false, message: 'Access denied' });
+        }
+        
+        // Get live attendance data
+        let attendanceRecords = [];
+        if (usingDb) {
+            attendanceRecords = await AttendanceLog.find({ sessionCode })
+                .sort({ timestamp: -1 })
+                .lean();
+        } else {
+            attendanceRecords = attendanceLogsMem.filter(l => l.sessionCode === sessionCode)
+                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        }
+        
+        // Check session status
+        const now = new Date();
+        const expiresAt = new Date(session.expiresAt);
+        const isExpired = now >= expiresAt;
+        const remainingSeconds = Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / 1000));
+        
+        res.json({
+            ok: true,
+            sessionCode,
+            session: {
+                courseCode: session.courseCode,
+                courseName: session.courseName,
+                lecturer: session.lecturer,
+                isExpired,
+                remainingSeconds,
+                expiresAt: session.expiresAt
+            },
+            attendance: {
+                totalCount: attendanceRecords.length,
+                records: attendanceRecords.map(record => ({
+                    studentId: record.studentId,
+                    studentName: record.studentName,
+                    centre: record.centre,
+                    timestamp: record.timestamp,
+                    checkInTime: new Date(record.timestamp).toLocaleTimeString(),
+                    timeAgo: Math.floor((now - new Date(record.timestamp)) / 1000) + ' seconds ago'
+                }))
+            },
+            lastUpdated: new Date().toISOString()
+        });
+    } catch (e) {
+        console.error('live attendance error:', e);
+        res.status(500).json({ 
+            ok: false, 
+            message: 'Failed to get live attendance', 
+            error: String(e?.message || e) 
+        });
+    }
+});
+
+// Get attendance count for a session (for popup display)
+router.get('/session/:sessionCode/attendance-count', auth(['lecturer','admin']), async (req, res) => {
+    try {
+        const { sessionCode } = req.params;
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        let count = 0;
+        let attendees = [];
+        
+        if (usingDb) {
+            const logs = await AttendanceLog.find({ sessionCode }).lean();
+            count = logs.length;
+            attendees = logs.map(log => ({
+                studentId: log.studentId,
+                studentName: log.studentName || 'Unknown',
+                timestamp: log.timestamp
+            }));
+        } else {
+            const logs = attendanceLogsMem.filter(l => l.sessionCode === sessionCode);
+            count = logs.length;
+            attendees = logs.map(log => ({
+                studentId: log.studentId,
+                studentName: log.studentName || 'Unknown',
+                timestamp: log.timestamp
+            }));
+        }
+        
+        res.json({
+            ok: true,
+            sessionCode,
+            attendanceCount: count,
+            attendees: attendees.slice(0, 10), // Show last 10 attendees
+            totalAttendees: count
+        });
+    } catch (e) {
+        console.error('attendance count error:', e);
+        res.status(500).json({ ok: false, message: 'Failed to get attendance count', error: String(e?.message || e) });
+    }
+});
+
+// Enhanced attendance export with multiple formats
+router.get('/export', auth(['lecturer','admin']), async (req, res) => {
+    const { courseCode, sessionCode, date = '', filterType = 'day', format = 'csv', startDate, endDate } = req.query || {};
+    const usingDb = mongoose.connection?.readyState === 1;
+    
+    try {
+        // Enhanced date filtering
         let start = null, end = null;
-        if (date) {
+        
+        if (startDate && endDate) {
+            start = new Date(startDate);
+            end = new Date(endDate);
+            end.setHours(23, 59, 59, 999); // Include full end date
+        } else if (date) {
             const base = new Date(String(date));
             if (!isNaN(base.getTime())) {
-                const s = new Date(base);
-                const e = new Date(base);
+                start = new Date(base);
+                end = new Date(base);
                 if (String(filterType) === 'week') {
-                    const d = s.getDay();
+                    const d = start.getDay();
                     const diffToMonday = (d + 6) % 7;
-                    s.setDate(s.getDate() - diffToMonday);
-                    e.setDate(s.getDate() + 7);
+                    start.setDate(start.getDate() - diffToMonday);
+                    end.setDate(start.getDate() + 7);
                 } else if (String(filterType) === 'month') {
-                    s.setDate(1);
-                    e.setMonth(s.getMonth() + 1);
-                    e.setDate(1);
+                    start.setDate(1);
+                    end.setMonth(start.getMonth() + 1);
+                    end.setDate(1);
                 } else {
-                    e.setDate(e.getDate() + 1);
+                    end.setDate(end.getDate() + 1);
                 }
-                start = s; end = e;
             }
         }
-        let result;
+        
+        // Get filtered data
+        let result = [];
         if (usingDb) {
-            const { records } = await AttendanceRecordService.getLogs({ courseCode, sessionCode, date, filterType, page: 1, limit: 100000 });
-            result = records;
+            let query = {};
+            if (courseCode) query.courseCode = courseCode;
+            if (sessionCode) query.sessionCode = sessionCode;
+            if (start && end) {
+                query.timestamp = { 
+                    $gte: start.toISOString(), 
+                    $lte: end.toISOString() 
+                };
+            }
+            
+            result = await AttendanceLog.find(query).sort({ timestamp: -1 }).lean();
         } else {
             result = attendanceLogsMem;
             if (courseCode) result = result.filter(r => (r.courseCode || '') === String(courseCode));
             if (sessionCode) result = result.filter(r => (r.sessionCode || '') === String(sessionCode));
             if (start && end) result = result.filter(r => {
                 const t = new Date(r.timestamp);
-                return !isNaN(t.getTime()) && t >= start && t < end;
+                return !isNaN(t.getTime()) && t >= start && t <= end;
             });
         }
-        const fields = ['timestamp','studentId','studentName','centre','courseCode','courseName','lecturer','sessionCode'];
-        const parser = new Parser({ fields });
-        const csv = parser.parse(result);
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename="attendance_export_${Date.now()}.csv"`);
-        res.send(csv);
+        
+        // Format data for export
+        const exportData = result.map(record => ({
+            'Session Code': record.sessionCode || '',
+            'Course Code': record.courseCode || '',
+            'Course Name': record.courseName || '',
+            'Student ID': record.studentId || '',
+            'Student Name': record.studentName || 'Unknown Student',
+            'Centre': record.centre || 'Not specified',
+            'Date': record.timestamp ? new Date(record.timestamp).toLocaleDateString() : '',
+            'Time': record.timestamp ? new Date(record.timestamp).toLocaleTimeString() : '',
+            'Lecturer': record.lecturer || '',
+            'Status': 'Present',
+            'Check-in Method': record.checkInMethod || 'Unknown'
+        }));
+        
+        if (format.toLowerCase() === 'excel') {
+            // For Excel format, we'll still use CSV but with proper headers for Excel compatibility
+            const fields = Object.keys(exportData[0] || {});
+            const parser = new Parser({ fields });
+            const csv = parser.parse(exportData);
+            
+            // Add BOM for proper UTF-8 encoding in Excel
+            const csvWithBOM = '\uFEFF' + csv;
+            
+            res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
+            res.setHeader('Content-Disposition', `attachment; filename="attendance_export_${Date.now()}.csv"`);
+            res.send(csvWithBOM);
+        } else {
+            // Standard CSV format
+            const fields = Object.keys(exportData[0] || {});
+            const parser = new Parser({ fields });
+            const csv = parser.parse(exportData);
+            
+            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+            res.setHeader('Content-Disposition', `attachment; filename="attendance_export_${Date.now()}.csv"`);
+            res.send(csv);
+        }
     } catch (e) {
         console.error('export error:', e);
         res.status(500).json({ ok: false, message: 'Failed to export', error: String(e?.message || e) });
+    }
+});
+
+// Get attendance records for lecturer (for frontend export preview)
+router.get('/lecturer/:lecturerId/records', auth(['lecturer','admin']), async (req, res) => {
+    try {
+        const { lecturerId } = req.params;
+        const { courseCode, startDate, endDate, limit = 1000 } = req.query || {};
+        
+        // Security check
+        if (req.user.role !== 'admin' && req.user.id !== lecturerId && req.user.name !== lecturerId) {
+            return res.status(403).json({ 
+                ok: false, 
+                message: 'Access denied. Can only view your own records.' 
+            });
+        }
+        
+        const usingDb = mongoose.connection?.readyState === 1;
+        let records = [];
+        
+        if (usingDb) {
+            let query = { lecturer: req.user.name };
+            if (courseCode) query.courseCode = courseCode;
+            if (startDate && endDate) {
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.timestamp = { 
+                    $gte: start.toISOString(), 
+                    $lte: end.toISOString() 
+                };
+            }
+            
+            records = await AttendanceLog.find(query)
+                .sort({ timestamp: -1 })
+                .limit(parseInt(limit))
+                .lean();
+        } else {
+            records = attendanceLogsMem.filter(r => r.lecturer === req.user.name);
+            if (courseCode) records = records.filter(r => r.courseCode === courseCode);
+            if (startDate && endDate) {
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                records = records.filter(r => {
+                    const t = new Date(r.timestamp);
+                    return t >= start && t <= end;
+                });
+            }
+            records = records.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                .slice(0, parseInt(limit));
+        }
+        
+        // Format for frontend display
+        const formattedRecords = records.map(record => ({
+            sessionCode: record.sessionCode,
+            courseCode: record.courseCode,
+            courseName: record.courseName,
+            studentId: record.studentId,
+            studentName: record.studentName || 'Unknown Student',
+            centre: record.centre || 'Not specified',
+            date: record.timestamp ? new Date(record.timestamp).toLocaleDateString() : '',
+            time: record.timestamp ? new Date(record.timestamp).toLocaleTimeString() : '',
+            lecturer: record.lecturer,
+            status: 'Present',
+            timestamp: record.timestamp
+        }));
+        
+        // Get unique courses for filtering
+        const uniqueCourses = [...new Set(records.map(r => r.courseCode).filter(Boolean))];
+        
+        res.json({
+            ok: true,
+            success: true,
+            records: formattedRecords,
+            totalRecords: formattedRecords.length,
+            courses: uniqueCourses,
+            dateRange: {
+                earliest: records.length > 0 ? records[records.length - 1].timestamp : null,
+                latest: records.length > 0 ? records[0].timestamp : null
+            },
+            persisted: usingDb
+        });
+    } catch (e) {
+        console.error('lecturer records error:', e);
+        res.status(500).json({ 
+            ok: false, 
+            message: 'Failed to fetch records', 
+            error: String(e?.message || e) 
+        });
+    }
+});
+
+// Test endpoint to simulate student check-ins (DEVELOPMENT ONLY)
+router.post('/simulate-checkin', async (req, res) => {
+    try {
+        const { sessionCode, count = 1 } = req.body || {};
+        
+        if (!sessionCode) {
+            return res.status(400).json({ ok: false, message: 'sessionCode is required' });
+        }
+        
+        // Verify session exists
+        const usingDb = mongoose.connection?.readyState === 1;
+        let session = null;
+        
+        if (usingDb) {
+            session = await AttendanceSession.findOne({ sessionCode }).lean();
+        } else {
+            session = sessionsMem.find(s => s.sessionCode === sessionCode);
+        }
+        
+        if (!session) {
+            return res.status(404).json({ ok: false, message: 'Session not found' });
+        }
+        
+        // Generate fake student check-ins
+        const fakeStudents = [
+            { id: 'S1001', name: 'Alice Johnson', centre: 'Kumasi' },
+            { id: 'S1002', name: 'Bob Smith', centre: 'Accra' },
+            { id: 'S1003', name: 'Carol Davis', centre: 'Kumasi' },
+            { id: 'S1004', name: 'David Wilson', centre: 'Takoradi' },
+            { id: 'S1005', name: 'Eva Brown', centre: 'Kumasi' },
+            { id: 'S1006', name: 'Frank Miller', centre: 'Accra' },
+            { id: 'S1007', name: 'Grace Lee', centre: 'Kumasi' },
+            { id: 'S1008', name: 'Henry Taylor', centre: 'Cape Coast' }
+        ];
+        
+        const createdEntries = [];
+        const numToCreate = Math.min(parseInt(count), fakeStudents.length);
+        
+        for (let i = 0; i < numToCreate; i++) {
+            const student = fakeStudents[i];
+            const attendanceEntry = {
+                studentId: student.id,
+                studentName: student.name,
+                sessionCode,
+                courseCode: session.courseCode,
+                courseName: session.courseName,
+                lecturer: session.lecturer,
+                centre: student.centre,
+                timestamp: new Date().toISOString(),
+                checkInMethod: 'SIMULATED'
+            };
+            
+            if (usingDb) {
+                // Check if already exists
+                const existing = await AttendanceLog.findOne({ 
+                    sessionCode, 
+                    studentId: student.id 
+                });
+                
+                if (!existing) {
+                    const created = await AttendanceLog.create(attendanceEntry);
+                    createdEntries.push(created);
+                }
+            } else {
+                const exists = attendanceLogsMem.find(l => 
+                    l.sessionCode === sessionCode && l.studentId === student.id
+                );
+                
+                if (!exists) {
+                    const newEntry = { id: Date.now().toString(36) + i, ...attendanceEntry };
+                    attendanceLogsMem.push(newEntry);
+                    createdEntries.push(newEntry);
+                }
+            }
+            
+            // Add small delay between entries
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        res.json({
+            ok: true,
+            message: `Simulated ${createdEntries.length} student check-ins`,
+            sessionCode,
+            created: createdEntries.length,
+            entries: createdEntries.map(entry => ({
+                studentId: entry.studentId,
+                studentName: entry.studentName,
+                centre: entry.centre,
+                timestamp: entry.timestamp
+            }))
+        });
+    } catch (e) {
+        console.error('simulate check-in error:', e);
+        res.status(500).json({ 
+            ok: false, 
+            message: 'Failed to simulate check-ins', 
+            error: String(e?.message || e) 
+        });
     }
 });
 

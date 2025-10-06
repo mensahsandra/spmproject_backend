@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { body, validationResult } = require("express-validator");
 const User = require('../models/User');
+const auth = require('../middleware/auth');
 const router = express.Router();
 
 // @route   POST /api/auth/login
@@ -284,6 +285,84 @@ router.post('/add-sample-students', async (req, res) => {
 // Helpful GET to indicate seeding endpoint usage (so a browser visit is informative)
 router.get('/add-test-users', (req, res) => {
     res.status(405).json({ ok: false, error: 'method_not_allowed', message: 'Use POST to /api/auth/add-test-users to (re)seed test users' });
+});
+
+// @route   GET /api/auth/profile
+// @desc    Get user profile
+// @access  Private
+router.get('/profile', auth(['student', 'lecturer', 'admin']), async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('-password').lean();
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        res.json({
+            success: true,
+            user: {
+                id: user._id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                ...(user.studentId && { studentId: user.studentId }),
+                ...(user.staffId && { staffId: user.staffId }),
+                ...(user.course && { course: user.course }),
+                ...(user.centre && { centre: user.centre }),
+                ...(user.semester && { semester: user.semester })
+            }
+        });
+    } catch (error) {
+        console.error("Profile fetch error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+});
+
+// @route   GET /api/auth/lecturer/profile
+// @desc    Get lecturer profile (alias for profile with lecturer-specific data)
+// @access  Private (Lecturer only)
+router.get('/lecturer/profile', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('-password').lean();
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "Lecturer not found"
+            });
+        }
+
+        if (user.role !== 'lecturer' && user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied. Lecturer role required."
+            });
+        }
+
+        res.json({
+            success: true,
+            lecturer: {
+                id: user._id,
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                staffId: user.staffId || 'N/A',
+                centre: user.centre || 'Not specified',
+                department: user.department || 'Not specified',
+                courses: user.courses || []
+            }
+        });
+    } catch (error) {
+        console.error("Lecturer profile fetch error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
 });
 
 module.exports = router;
