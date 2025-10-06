@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Quiz API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; }
+        .success { background-color: #d4edda; }
+        .error { background-color: #f8d7da; }
+        button { padding: 10px 20px; margin: 5px; }
+        pre { background: #f8f9fa; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Quiz API Frontend Test</h1>
+    
+    <div class="test-section">
+        <h3>1. Test Server Health</h3>
+        <button onclick="testHealth()">Test Health Endpoint</button>
+        <div id="health-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>2. Test Quiz Routes</h3>
+        <button onclick="testQuizRoutes()">Test Quiz Test Endpoint</button>
+        <div id="quiz-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>3. Test Minimal Quiz Creation</h3>
+        <button onclick="testMinimalQuizCreation()">Test Minimal Creation</button>
+        <div id="minimal-result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>4. Test Form Data Quiz Creation</h3>
+        <button onclick="testFormDataQuizCreation()">Test Form Data Creation</button>
+        <div id="formdata-result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3000/api';
+        
+        function displayResult(elementId, success, data) {
+            const element = document.getElementById(elementId);
+            element.className = success ? 'success' : 'error';
+            element.innerHTML = `
+                <h4>${success ? '✅ Success' : '❌ Error'}</h4>
+                <pre>${JSON.stringify(data, null, 2)}</pre>
+            `;
+        }
+        
+        async function testHealth() {
+            try {
+                console.log('Testing health endpoint...');
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                displayResult('health-result', response.ok, { status: response.status, data });
+            } catch (error) {
+                console.error('Health test error:', error);
+                displayResult('health-result', false, { error: error.message });
+            }
+        }
+        
+        async function testQuizRoutes() {
+            try {
+                console.log('Testing quiz routes...');
+                const response = await fetch(`${API_BASE}/quizzes/test`);
+                const data = await response.json();
+                displayResult('quiz-result', response.ok, { status: response.status, data });
+            } catch (error) {
+                console.error('Quiz routes test error:', error);
+                displayResult('quiz-result', false, { error: error.message });
+            }
+        }
+        
+        async function testMinimalQuizCreation() {
+            try {
+                console.log('Testing minimal quiz creation...');
+                const response = await fetch(`${API_BASE}/quizzes/create-minimal`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        title: 'Test Quiz',
+                        courseCode: 'BIT364',
+                        description: 'Test description'
+                    })
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers);
+                
+                const data = await response.json();
+                displayResult('minimal-result', response.ok, { status: response.status, data });
+            } catch (error) {
+                console.error('Minimal quiz creation error:', error);
+                displayResult('minimal-result', false, { error: error.message });
+            }
+        }
+        
+        async function testFormDataQuizCreation() {
+            try {
+                console.log('Testing form data quiz creation...');
+                const formData = new FormData();
+                formData.append('title', 'Form Data Test Quiz');
+                formData.append('courseCode', 'BIT364');
+                formData.append('description', 'Test with form data');
+                formData.append('startTime', new Date().toISOString());
+                formData.append('endTime', new Date(Date.now() + 3600000).toISOString());
+                
+                const response = await fetch(`${API_BASE}/quizzes/create-simple`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                console.log('FormData response status:', response.status);
+                const data = await response.json();
+                displayResult('formdata-result', response.ok, { status: response.status, data });
+            } catch (error) {
+                console.error('Form data quiz creation error:', error);
+                displayResult('formdata-result', false, { error: error.message });
+            }
+        }
+        
+        // Auto-run health test on page load
+        window.onload = () => {
+            console.log('Page loaded, running health test...');
+            testHealth();
+        };
+    </script>
+</body>
+</html>

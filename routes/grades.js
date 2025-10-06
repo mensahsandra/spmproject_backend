@@ -24,6 +24,21 @@ router.get('/', (req, res) => {
     });
 });
 
+// Health check for grades/results system
+router.get('/health', (req, res) => {
+    res.json({
+        success: true,
+        status: 'ok',
+        message: 'Grades system is operational',
+        endpoints: [
+            '/api/grades/academic-years',
+            '/api/grades/semesters', 
+            '/api/grades/select-result-data',
+            '/api/grades/student-results'
+        ]
+    });
+});
+
 // Lecturer: list grades (optionally filter by courseCode)
 router.get('/list', auth(['lecturer','admin']), (req, res) => {
     const { courseCode } = req.query || {};
@@ -198,5 +213,264 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), (req, res) => {
         });
     }
 });
+
+// Student: Get academic years for dropdown
+router.get('/academic-years', (req, res) => {
+    const academicYears = [
+        { value: '2024-2025', label: '2024/2025' },
+        { value: '2023-2024', label: '2023/2024' },
+        { value: '2022-2023', label: '2022/2023' }
+    ];
+    res.json({
+        success: true,
+        academicYears
+    });
+});
+
+// Student: Get semesters for dropdown
+router.get('/semesters', (req, res) => {
+    const semesters = [
+        { value: 'semester-1', label: 'Semester 1' },
+        { value: 'semester-2', label: 'Semester 2' },
+        { value: 'semester-3', label: 'Semester 3' }
+    ];
+    res.json({
+        success: true,
+        semesters
+    });
+});
+
+// Student: Get initial data for select-result page
+router.get('/select-result-data', (req, res) => {
+    const academicYears = [
+        { value: '2024-2025', label: '2024/2025' },
+        { value: '2023-2024', label: '2023/2024' },
+        { value: '2022-2023', label: '2022/2023' }
+    ];
+    
+    const semesters = [
+        { value: 'semester-1', label: 'Semester 1' },
+        { value: 'semester-2', label: 'Semester 2' },
+        { value: 'semester-3', label: 'Semester 3' }
+    ];
+    
+    res.json({
+        success: true,
+        data: {
+            academicYears,
+            semesters,
+            defaultAcademicYear: '2024-2025',
+            defaultSemester: 'semester-3'
+        }
+    });
+});
+
+// Student: Get results for select-result page
+router.get('/student-results', (req, res) => {
+    const { academicYear, semester, studentId } = req.query;
+    
+    // Filter results based on query parameters
+    let results = gradeStore;
+    
+    if (studentId) {
+        results = results.filter(g => g.studentId === studentId);
+    }
+    
+    // Group results by course
+    const courseResults = {};
+    results.forEach(grade => {
+        if (!courseResults[grade.courseCode]) {
+            courseResults[grade.courseCode] = {
+                courseCode: grade.courseCode,
+                courseName: grade.courseCode === 'BIT364' ? 'Business Information Technology' : 
+                           grade.courseCode === 'CS101' ? 'Introduction to Computer Science' : 
+                           grade.courseCode,
+                assessments: [],
+                totalScore: 0,
+                maxTotalScore: 0,
+                overallGrade: '',
+                creditHours: 3
+            };
+        }
+        
+        courseResults[grade.courseCode].assessments.push({
+            type: grade.assessmentType,
+            score: grade.score,
+            maxScore: grade.maxScore,
+            percentage: grade.percentage,
+            grade: grade.grade,
+            feedback: grade.feedback,
+            submissionDate: grade.submissionDate
+        });
+        
+        courseResults[grade.courseCode].totalScore += grade.score || 0;
+        courseResults[grade.courseCode].maxTotalScore += grade.maxScore || 0;
+    });
+    
+    // Calculate overall grades
+    Object.values(courseResults).forEach(course => {
+        const overallPercentage = course.maxTotalScore > 0 ? 
+            (course.totalScore / course.maxTotalScore) * 100 : 0;
+        
+        if (overallPercentage >= 90) course.overallGrade = 'A';
+        else if (overallPercentage >= 80) course.overallGrade = 'B+';
+        else if (overallPercentage >= 70) course.overallGrade = 'B';
+        else if (overallPercentage >= 60) course.overallGrade = 'C+';
+        else if (overallPercentage >= 50) course.overallGrade = 'C';
+        else course.overallGrade = 'F';
+        
+        course.overallPercentage = Math.round(overallPercentage);
+    });
+    
+    res.json({
+        success: true,
+        academicYear: academicYear || '2024-2025',
+        semester: semester || 'semester-3',
+        studentId: studentId || '1234567',
+        results: Object.values(courseResults),
+        summary: {
+            totalCourses: Object.keys(courseResults).length,
+            totalCreditHours: Object.keys(courseResults).length * 3,
+            gpa: calculateGPA(Object.values(courseResults))
+        }
+    });
+});
+
+// Bulk assign grades to students
+router.post('/bulk-assign', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const { 
+            courseCode, 
+            assessmentType, 
+            score, 
+            maxScore, 
+            grade, 
+            feedback, 
+            studentFilter = 'all' // 'all', 'attendees', 'quiz_submitters'
+        } = req.body;
+
+        // Validate required fields
+        if (!courseCode || !assessmentType || score === undefined) {
+            return res.status(400).json({
+                ok: false,
+                message: 'Course code, assessment type, and score are required'
+            });
+        }
+
+        // Get students based on filter
+        let targetStudents = [];
+        
+        if (studentFilter === 'all') {
+            // Get all students enrolled in the course
+            // For demo purposes, using mock data - in real app, query User model
+            targetStudents = [
+                { studentId: '1234567', studentName: 'Ransford Student' },
+                { studentId: 'S1001', studentName: 'Alice Johnson' },
+                { studentId: 'S1002', studentName: 'Bob Smith' },
+                { studentId: 'S1003', studentName: 'Carol Davis' }
+            ];
+        } else if (studentFilter === 'attendees') {
+            // Get students who attended classes (would query attendance records)
+            targetStudents = [
+                { studentId: '1234567', studentName: 'Ransford Student' },
+                { studentId: 'S1001', studentName: 'Alice Johnson' },
+                { studentId: 'S1002', studentName: 'Bob Smith' }
+            ];
+        } else if (studentFilter === 'quiz_submitters') {
+            // Get students who submitted the quiz (would query quiz submissions)
+            targetStudents = [
+                { studentId: '1234567', studentName: 'Ransford Student' },
+                { studentId: 'S1001', studentName: 'Alice Johnson' }
+            ];
+        }
+
+        // Calculate percentage if maxScore provided
+        const percentage = maxScore ? Math.round((score / maxScore) * 100) : null;
+        
+        // Create grade entries for each student
+        const newGrades = [];
+        const timestamp = new Date().toISOString();
+        
+        targetStudents.forEach(student => {
+            // Remove existing grade for same assessment if exists
+            const existingIndex = gradeStore.findIndex(g => 
+                g.courseCode === courseCode && 
+                g.studentId === student.studentId && 
+                g.assessmentType === assessmentType
+            );
+            
+            if (existingIndex >= 0) {
+                gradeStore.splice(existingIndex, 1);
+            }
+            
+            // Add new grade
+            const gradeEntry = {
+                courseCode,
+                studentId: student.studentId,
+                studentName: student.studentName,
+                assessmentType,
+                score: Number(score),
+                maxScore: maxScore ? Number(maxScore) : null,
+                percentage,
+                grade: grade || calculateLetterGrade(percentage || (score * 5)), // Simple grade calculation
+                submissionDate: timestamp,
+                feedback: feedback || '',
+                lecturer: req.user.name || 'Unknown Lecturer'
+            };
+            
+            gradeStore.push(gradeEntry);
+            newGrades.push(gradeEntry);
+        });
+
+        res.json({
+            ok: true,
+            message: `Successfully assigned grades to ${targetStudents.length} students`,
+            assignedGrades: newGrades.length,
+            studentFilter,
+            courseCode,
+            assessmentType,
+            grades: newGrades
+        });
+
+    } catch (error) {
+        console.error('bulk grade assignment error:', error);
+        res.status(500).json({
+            ok: false,
+            message: 'Failed to assign bulk grades',
+            error: error.message
+        });
+    }
+});
+
+// Helper function to calculate letter grade from percentage
+function calculateLetterGrade(percentage) {
+    if (percentage >= 90) return 'A';
+    if (percentage >= 80) return 'B+';
+    if (percentage >= 70) return 'B';
+    if (percentage >= 60) return 'C+';
+    if (percentage >= 50) return 'C';
+    if (percentage >= 40) return 'D';
+    return 'F';
+}
+
+// Helper function to calculate GPA
+function calculateGPA(courses) {
+    if (courses.length === 0) return 0;
+    
+    const gradePoints = {
+        'A': 4.0, 'B+': 3.5, 'B': 3.0, 'C+': 2.5, 'C': 2.0, 'D': 1.0, 'F': 0.0
+    };
+    
+    let totalPoints = 0;
+    let totalCredits = 0;
+    
+    courses.forEach(course => {
+        const points = gradePoints[course.overallGrade] || 0;
+        totalPoints += points * course.creditHours;
+        totalCredits += course.creditHours;
+    });
+    
+    return totalCredits > 0 ? (totalPoints / totalCredits).toFixed(2) : 0;
+}
 
 module.exports = router;

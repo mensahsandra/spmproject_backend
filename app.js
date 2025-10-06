@@ -130,6 +130,8 @@ app.use("/api/grades", require("./routes/grades"));
 app.use("/api/grades", require("./routes/grades_v2"));
 // Assessment routes (alias for grades)
 app.use("/api/assessments", require("./routes/grades"));
+// Quiz management routes
+app.use("/api/quizzes", require("./routes/quizzes"));
 app.use("/api/cwa", require("./routes/cwa"));
 app.use("/api/deadlines", require("./routes/deadlines"));
 
