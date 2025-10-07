@@ -122,8 +122,8 @@ app.use((req, res, next) => {
 });
 
 // Routes with targeted rate limiting
-app.use("/api/auth", authLimiter, require("./routes/auth"));
-app.use("/api/attendance", attendanceLimiter, require("./routes/attendance"));
+app.use("/api/auth", require("./routes/auth")); // Temporarily removed authLimiter
+app.use("/api/attendance", require("./routes/attendance")); // Temporarily removed attendanceLimiter
 // Main grades routes (includes student-results endpoint)
 app.use("/api/grades", require("./routes/grades"));
 // Assessment routes (alias for grades for backward compatibility)
