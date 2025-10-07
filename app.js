@@ -124,14 +124,8 @@ app.use((req, res, next) => {
 // Routes with targeted rate limiting
 app.use("/api/auth", authLimiter, require("./routes/auth"));
 app.use("/api/attendance", attendanceLimiter, require("./routes/attendance"));
-// Student and lecturer grades routes (includes student-results endpoint)
+// Main grades routes (includes student-results endpoint)
 app.use("/api/grades", require("./routes/grades"));
-// Additional lecturer tools (enrolled, bulk-update) - only if grades_v2 exists
-try {
-    app.use("/api/grades", require("./routes/grades_v2"));
-} catch (e) {
-    console.log('grades_v2 not found, skipping...');
-}
 // Assessment routes (alias for grades for backward compatibility)
 app.use("/api/assessments", require("./routes/grades"));
 // Quiz management routes (lecturer only)

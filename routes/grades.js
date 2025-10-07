@@ -215,7 +215,7 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), (req, res) => {
 });
 
 // Student: Get academic years for dropdown
-router.get('/academic-years', auth(['student', 'lecturer', 'admin']), (req, res) => {
+router.get('/academic-years', (req, res) => {
     const academicYears = [
         { value: '2024-2025', label: '2024/2025' },
         { value: '2023-2024', label: '2023/2024' },
@@ -228,7 +228,7 @@ router.get('/academic-years', auth(['student', 'lecturer', 'admin']), (req, res)
 });
 
 // Student: Get semesters for dropdown
-router.get('/semesters', auth(['student', 'lecturer', 'admin']), (req, res) => {
+router.get('/semesters', (req, res) => {
     const semesters = [
         { value: 'semester-1', label: 'Semester 1' },
         { value: 'semester-2', label: 'Semester 2' },
@@ -241,7 +241,7 @@ router.get('/semesters', auth(['student', 'lecturer', 'admin']), (req, res) => {
 });
 
 // Student: Get initial data for select-result page
-router.get('/select-result-data', auth(['student', 'lecturer', 'admin']), (req, res) => {
+router.get('/select-result-data', (req, res) => {
     const academicYears = [
         { value: '2024-2025', label: '2024/2025' },
         { value: '2023-2024', label: '2023/2024' },
@@ -266,7 +266,7 @@ router.get('/select-result-data', auth(['student', 'lecturer', 'admin']), (req, 
 });
 
 // Student: Get results for select-result page
-router.get('/student-results', auth(['student', 'admin']), (req, res) => {
+router.get('/student-results', (req, res) => {
     const { academicYear, semester, studentId } = req.query;
     
     // Filter results based on query parameters
