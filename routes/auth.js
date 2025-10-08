@@ -207,14 +207,21 @@ router.post("/add-test-users", async (req, res) => {
             semester: 'Fall 2025'
         };
 
-        // Define lecturer user
+        // Define lecturer user with enhanced details
         const lecturerUser = {
             email: 'kwabena@knust.edu.gh',
             password: lecturerPasswordHash,
             name: 'Kwabena Lecturer',
             role: 'lecturer',
             staffId: 'STF123',
-            centre: 'Kumasi'
+            centre: 'Kumasi',
+            honorific: 'Prof.',
+            title: 'Senior Lecturer',
+            department: 'Information Technology',
+            courses: ['BIT364', 'BIT301', 'CS101'],
+            officeLocation: 'IT Block, Room 205',
+            phoneNumber: '+233-24-123-4567',
+            fullName: 'Prof. Kwabena Lecturer'
         };
 
         // Check if users exist and create/update as needed
@@ -334,16 +341,23 @@ router.get('/me-bypass', async (req, res) => {
             userId: 'debug-user',
             lecturerId: 'debug-user', // This should fix the undefined lecturer ID
             email: 'debug@example.com',
-            name: 'Debug User',
+            name: 'Debug Lecturer',
             role: 'lecturer', // Change to lecturer to test attendance
-            staffId: 'STF123'
+            staffId: 'STF123',
+            honorific: 'Prof.',
+            title: 'Senior Lecturer',
+            department: 'Information Technology',
+            courses: ['BIT364', 'BIT301', 'CS101'],
+            fullName: 'Prof. Debug Lecturer',
+            centre: 'Kumasi',
+            officeLocation: 'IT Block, Room 205'
         },
         debug: true,
         message: 'Bypass endpoint - for debugging only'
     });
 });
 
-// Enhanced /me endpoint with explicit IDs
+// Enhanced /me endpoint with explicit IDs and full lecturer details
 router.get('/me-enhanced', auth(['student', 'lecturer', 'admin']), async (req, res) => {
     try {
         const user = await User.findById(req.user.id).select('-password').lean();
@@ -354,21 +368,43 @@ router.get('/me-enhanced', auth(['student', 'lecturer', 'admin']), async (req, r
             });
         }
 
+        const responseUser = {
+            id: user._id,
+            userId: user._id,
+            lecturerId: user._id, // Explicit lecturerId for attendance routes
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            centre: user.centre,
+            isActive: user.isActive !== false
+        };
+
+        // Add student-specific fields
+        if (user.role === 'student') {
+            Object.assign(responseUser, {
+                studentId: user.studentId,
+                course: user.course,
+                semester: user.semester
+            });
+        }
+
+        // Add lecturer-specific fields
+        if (user.role === 'lecturer') {
+            Object.assign(responseUser, {
+                staffId: user.staffId,
+                honorific: user.honorific || 'Mr.',
+                title: user.title || 'Lecturer',
+                department: user.department || 'Information Technology',
+                courses: user.courses || ['BIT364'],
+                fullName: user.fullName || `${user.honorific || 'Mr.'} ${user.name}`,
+                officeLocation: user.officeLocation,
+                phoneNumber: user.phoneNumber
+            });
+        }
+
         res.json({
             success: true,
-            user: {
-                id: user._id,
-                userId: user._id,
-                lecturerId: user._id, // Explicit lecturerId for attendance routes
-                email: user.email,
-                name: user.name,
-                role: user.role,
-                ...(user.studentId && { studentId: user.studentId }),
-                ...(user.staffId && { staffId: user.staffId }),
-                ...(user.course && { course: user.course }),
-                ...(user.centre && { centre: user.centre }),
-                ...(user.semester && { semester: user.semester })
-            }
+            user: responseUser
         });
     } catch (error) {
         console.error("Enhanced auth me error:", error.message);
@@ -613,10 +649,17 @@ router.get('/lecturer/dashboard', auth(['lecturer', 'admin']), async (req, res) 
             },
             profile: {
                 name: user.name,
+                fullName: user.fullName || `${user.honorific || 'Mr.'} ${user.name}`,
+                honorific: user.honorific || 'Mr.',
+                title: user.title || 'Lecturer',
+                department: user.department || 'Information Technology',
                 role: user.role,
                 staffId: user.staffId,
                 email: user.email,
                 centre: user.centre || 'Not specified',
+                courses: user.courses || ['BIT364'],
+                officeLocation: user.officeLocation,
+                phoneNumber: user.phoneNumber,
                 avatar: user.avatar || null
             },
             dashboardCards: [
