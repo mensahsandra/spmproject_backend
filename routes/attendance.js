@@ -583,10 +583,42 @@ router.get('/session/:sessionCode/status', auth(['lecturer','admin']), async (re
     }
 });
 
+// Debug endpoint to check user authentication
+router.get('/debug-user', auth(['lecturer','admin']), async (req, res) => {
+    try {
+        res.json({
+            debug: true,
+            authenticatedUser: {
+                id: req.user?.id,
+                name: req.user?.name,
+                email: req.user?.email,
+                role: req.user?.role,
+                staffId: req.user?.staffId
+            },
+            timestamp: new Date().toISOString(),
+            message: 'This shows the actual authenticated user data'
+        });
+    } catch (error) {
+        res.status(500).json({
+            debug: true,
+            error: error.message,
+            message: 'Error getting user data'
+        });
+    }
+});
+
 // Lecturer: get structured attendance data for attendance page
 router.get('/lecturer-dashboard', auth(['lecturer','admin']), async (req, res) => {
     try {
         const lecturerName = req.user?.name || 'Unknown Lecturer';
+        
+        // Debug logging
+        console.log('🔍 Lecturer Dashboard Request:', {
+            userId: req.user?.id,
+            userName: req.user?.name,
+            userEmail: req.user?.email,
+            userRole: req.user?.role
+        });
         const { courseCode, sessionCode, date = '', limit = 50 } = req.query || {};
         const usingDb = mongoose.connection?.readyState === 1;
         
@@ -652,9 +684,15 @@ router.get('/lecturer-dashboard', auth(['lecturer','admin']), async (req, res) =
             lecturer: {
                 name: lecturerName,
                 email: req.user?.email || 'N/A',
-                staffId: req.user?.staffId || 'N/A'
+                staffId: req.user?.staffId || 'N/A',
+                id: req.user?.id || 'N/A'
             },
-            courseInfo,
+            courseInfo: courseInfo || {
+                courseCode: 'No sessions yet',
+                courseName: 'Create a session to see course info',
+                lecturer: lecturerName,
+                classRepresentative: 'To be assigned'
+            },
             activeSession: activeSession ? {
                 sessionCode: activeSession.sessionCode,
                 courseCode: activeSession.courseCode,
@@ -670,7 +708,14 @@ router.get('/lecturer-dashboard', auth(['lecturer','admin']), async (req, res) =
                 const today = new Date().toDateString();
                 return logDate === today;
             }).length,
-            persisted: usingDb
+            persisted: usingDb,
+            debug: {
+                authenticatedUser: req.user?.name,
+                sessionsFound: sessions.length,
+                attendanceLogsFound: attendanceLogs.length,
+                usingDatabase: usingDb,
+                timestamp: new Date().toISOString()
+            }
         });
     } catch (e) {
         console.error('lecturer dashboard error:', e);

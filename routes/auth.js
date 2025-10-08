@@ -777,12 +777,12 @@ router.put('/profile', auth(['student', 'lecturer', 'admin']), async (req, res) 
 
         // Prepare update object
         const updateObj = {};
-        
+
         // Common fields
         if (name) updateObj.name = name;
         if (centre) updateObj.centre = centre;
         if (semester) updateObj.semester = semester;
-        
+
         // Role-specific fields
         if (user.role === 'lecturer') {
             if (honorific) updateObj.honorific = honorific;
@@ -790,13 +790,13 @@ router.put('/profile', auth(['student', 'lecturer', 'admin']), async (req, res) 
             if (department) updateObj.department = department;
             if (officeLocation) updateObj.officeLocation = officeLocation;
             if (phoneNumber) updateObj.phoneNumber = phoneNumber;
-            
+
             // Update fullName if honorific or name changed
             if (honorific || name) {
                 updateObj.fullName = `${honorific || user.honorific || 'Mr.'} ${name || user.name}`;
             }
         }
-        
+
         // Handle courses update
         if (courses && Array.isArray(courses)) {
             updateObj.courses = courses;
