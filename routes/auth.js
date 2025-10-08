@@ -292,19 +292,19 @@ router.get('/debug-token', (req, res) => {
     try {
         const authHeader = req.headers.authorization || '';
         const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-        
+
         if (!token) {
-            return res.json({ 
-                debug: true, 
-                issue: 'no_token', 
+            return res.json({
+                debug: true,
+                issue: 'no_token',
                 authHeader: authHeader,
-                message: 'No token provided' 
+                message: 'No token provided'
             });
         }
 
         const jwt = require('jsonwebtoken');
         const payload = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret_change_me');
-        
+
         res.json({
             debug: true,
             issue: 'none',
@@ -331,14 +331,52 @@ router.get('/me-bypass', async (req, res) => {
         success: true,
         user: {
             id: 'debug-user',
+            userId: 'debug-user',
+            lecturerId: 'debug-user', // This should fix the undefined lecturer ID
             email: 'debug@example.com',
             name: 'Debug User',
-            role: 'student',
-            studentId: '1234567'
+            role: 'lecturer', // Change to lecturer to test attendance
+            staffId: 'STF123'
         },
         debug: true,
         message: 'Bypass endpoint - for debugging only'
     });
+});
+
+// Enhanced /me endpoint with explicit IDs
+router.get('/me-enhanced', auth(['student', 'lecturer', 'admin']), async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('-password').lean();
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        res.json({
+            success: true,
+            user: {
+                id: user._id,
+                userId: user._id,
+                lecturerId: user._id, // Explicit lecturerId for attendance routes
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                ...(user.studentId && { studentId: user.studentId }),
+                ...(user.staffId && { staffId: user.staffId }),
+                ...(user.course && { course: user.course }),
+                ...(user.centre && { centre: user.centre }),
+                ...(user.semester && { semester: user.semester })
+            }
+        });
+    } catch (error) {
+        console.error("Enhanced auth me error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
 });
 
 // @route   GET /api/auth/me
