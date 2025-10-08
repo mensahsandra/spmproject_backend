@@ -287,6 +287,60 @@ router.get('/add-test-users', (req, res) => {
     res.status(405).json({ ok: false, error: 'method_not_allowed', message: 'Use POST to /api/auth/add-test-users to (re)seed test users' });
 });
 
+// Debug endpoint to see what's in the token
+router.get('/debug-token', (req, res) => {
+    try {
+        const authHeader = req.headers.authorization || '';
+        const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+        
+        if (!token) {
+            return res.json({ 
+                debug: true, 
+                issue: 'no_token', 
+                authHeader: authHeader,
+                message: 'No token provided' 
+            });
+        }
+
+        const jwt = require('jsonwebtoken');
+        const payload = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret_change_me');
+        
+        res.json({
+            debug: true,
+            issue: 'none',
+            tokenValid: true,
+            payload: payload,
+            userRole: payload.user?.role || payload.role,
+            userId: payload.user?.id || payload.id,
+            message: 'Token is valid'
+        });
+    } catch (e) {
+        res.json({
+            debug: true,
+            issue: 'invalid_token',
+            error: e.message,
+            message: 'Token is invalid'
+        });
+    }
+});
+
+// Temporary bypass endpoint for debugging
+router.get('/me-bypass', async (req, res) => {
+    // Return a mock successful response to stop redirect loop
+    res.json({
+        success: true,
+        user: {
+            id: 'debug-user',
+            email: 'debug@example.com',
+            name: 'Debug User',
+            role: 'student',
+            studentId: '1234567'
+        },
+        debug: true,
+        message: 'Bypass endpoint - for debugging only'
+    });
+});
+
 // @route   GET /api/auth/me
 // @desc    Get current authenticated user
 // @access  Private
