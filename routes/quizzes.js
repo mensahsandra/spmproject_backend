@@ -486,22 +486,58 @@ router.get('/lecturer/dashboard', auth(['lecturer', 'admin']), async (req, res) 
 // Get courses taught by lecturer (for dropdown)
 router.get('/lecturer/courses', auth(['lecturer', 'admin']), async (req, res) => {
   try {
-    // In a real app, this would query a courses table or user-course relationships
-    // For demo, return mock courses based on existing grade data
-    const mockCourses = [
-      { code: 'BIT364', name: 'Business Information Technology' },
-      { code: 'CS101', name: 'Introduction to Computer Science' },
-      { code: 'CS201', name: 'Data Structures and Algorithms' },
-      { code: 'BIT301', name: 'Database Management Systems' }
-    ];
-
+    const User = require('../models/User');
+    const Course = require('../models/Course');
+    
+    // Get lecturer's assigned courses
+    const lecturer = await User.findById(req.user.id).select('courses teachingAssignments');
+    
+    if (!lecturer) {
+      return res.status(404).json({
+        ok: false,
+        message: 'Lecturer not found'
+      });
+    }
+    
+    // Get course details for lecturer's courses
+    const courseDetails = await Course.find({
+      code: { $in: lecturer.courses || [] },
+      isActive: true
+    }).select('code name department credits');
+    
+    // If no courses assigned, return default courses for demo
+    if (courseDetails.length === 0) {
+      const defaultCourses = await Course.find({
+        code: { $in: ['BIT364', 'CS101', 'BIT301'] },
+        isActive: true
+      }).select('code name department credits');
+      
+      return res.json({
+        ok: true,
+        courses: defaultCourses.map(course => ({
+          code: course.code,
+          name: course.name,
+          department: course.department,
+          credits: course.credits
+        })),
+        isDefault: true,
+        message: 'Showing default courses. Please update your teaching assignments.'
+      });
+    }
+    
     res.json({
       ok: true,
-      courses: mockCourses
+      courses: courseDetails.map(course => ({
+        code: course.code,
+        name: course.name,
+        department: course.department,
+        credits: course.credits
+      })),
+      total: courseDetails.length
     });
 
   } catch (error) {
-    logger.error('quiz.courses.error', { error: error.message, user: req.user.id });
+    console.error('Quiz courses error:', error);
     res.status(500).json({
       ok: false,
       message: 'Failed to fetch courses',

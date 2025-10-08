@@ -128,6 +128,8 @@ app.use("/api/attendance", require("./routes/attendance")); // Temporarily remov
 app.use("/api/grades", require("./routes/grades"));
 // Assessment routes (alias for grades for backward compatibility)
 app.use("/api/assessments", require("./routes/grades"));
+// Course management routes
+app.use("/api/courses", require("./routes/courses"));
 // Quiz management routes (lecturer only)
 app.use("/api/quizzes", require("./routes/quizzes"));
 app.use("/api/cwa", require("./routes/cwa"));

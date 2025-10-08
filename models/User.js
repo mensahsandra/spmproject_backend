@@ -9,7 +9,7 @@ const UserSchema = new mongoose.Schema({
   
   // Student fields
   studentId: { type: String, index: true },
-  course: String, // For students: their enrolled course
+  course: String, // Legacy field - kept for backward compatibility
   centre: String,
   semester: String,
   
@@ -18,9 +18,34 @@ const UserSchema = new mongoose.Schema({
   honorific: { type: String, enum: ['Prof.', 'Dr.', 'Mr.', 'Ms.', 'Mrs.', 'Assoc. Prof.', 'Asst. Prof.'], default: 'Mr.' },
   title: String, // e.g., "Senior Lecturer", "Professor", "Associate Professor"
   department: String, // e.g., "Computer Science", "Information Technology"
-  courses: [String], // Array of courses taught e.g., ["BIT364", "CS101", "BIT301"]
   officeLocation: String,
   phoneNumber: String,
+  
+  // Enhanced course management (for both students and lecturers)
+  courses: [String], // Current active courses (enrolled for students, taught for lecturers)
+  
+  // Detailed course enrollment/teaching history
+  courseEnrollments: [{
+    courseCode: { type: String, required: true },
+    courseName: String,
+    enrolledAt: { type: Date, default: Date.now },
+    status: { type: String, enum: ['active', 'completed', 'dropped', 'withdrawn'], default: 'active' },
+    semester: String,
+    academicYear: String,
+    grade: String, // Final grade if completed
+    credits: Number
+  }],
+  
+  // For lecturers - teaching assignments
+  teachingAssignments: [{
+    courseCode: { type: String, required: true },
+    courseName: String,
+    assignedAt: { type: Date, default: Date.now },
+    status: { type: String, enum: ['active', 'completed', 'inactive'], default: 'active' },
+    semester: String,
+    academicYear: String,
+    studentsEnrolled: { type: Number, default: 0 }
+  }],
   
   // Common fields
   fullName: String, // Computed field: honorific + name

@@ -749,4 +749,148 @@ router.get('/page-config/:role/:page', auth(['student', 'lecturer', 'admin']), a
     }
 });
 
+// @route   PUT /api/auth/profile
+// @desc    Update user profile including courses
+// @access  Private
+router.put('/profile', auth(['student', 'lecturer', 'admin']), async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const {
+            name,
+            courses,
+            centre,
+            semester,
+            honorific,
+            title,
+            department,
+            officeLocation,
+            phoneNumber
+        } = req.body;
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        // Prepare update object
+        const updateObj = {};
+        
+        // Common fields
+        if (name) updateObj.name = name;
+        if (centre) updateObj.centre = centre;
+        if (semester) updateObj.semester = semester;
+        
+        // Role-specific fields
+        if (user.role === 'lecturer') {
+            if (honorific) updateObj.honorific = honorific;
+            if (title) updateObj.title = title;
+            if (department) updateObj.department = department;
+            if (officeLocation) updateObj.officeLocation = officeLocation;
+            if (phoneNumber) updateObj.phoneNumber = phoneNumber;
+            
+            // Update fullName if honorific or name changed
+            if (honorific || name) {
+                updateObj.fullName = `${honorific || user.honorific || 'Mr.'} ${name || user.name}`;
+            }
+        }
+        
+        // Handle courses update
+        if (courses && Array.isArray(courses)) {
+            updateObj.courses = courses;
+        }
+
+        // Update user
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            updateObj,
+            { new: true }
+        ).select('-password');
+
+        res.json({
+            success: true,
+            message: 'Profile updated successfully',
+            user: {
+                id: updatedUser._id,
+                userId: updatedUser._id,
+                lecturerId: updatedUser._id,
+                email: updatedUser.email,
+                name: updatedUser.name,
+                role: updatedUser.role,
+                courses: updatedUser.courses,
+                centre: updatedUser.centre,
+                semester: updatedUser.semester,
+                ...(updatedUser.role === 'student' && {
+                    studentId: updatedUser.studentId,
+                    courseEnrollments: updatedUser.courseEnrollments
+                }),
+                ...(updatedUser.role === 'lecturer' && {
+                    staffId: updatedUser.staffId,
+                    honorific: updatedUser.honorific,
+                    title: updatedUser.title,
+                    department: updatedUser.department,
+                    fullName: updatedUser.fullName,
+                    officeLocation: updatedUser.officeLocation,
+                    phoneNumber: updatedUser.phoneNumber,
+                    teachingAssignments: updatedUser.teachingAssignments
+                })
+            }
+        });
+    } catch (error) {
+        console.error("Profile update error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+});
+
+// @route   PATCH /api/auth/courses
+// @desc    Update only user courses
+// @access  Private
+router.patch('/courses', auth(['student', 'lecturer', 'admin']), async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { courses } = req.body;
+
+        if (!courses || !Array.isArray(courses)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Courses array is required'
+            });
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            { courses },
+            { new: true }
+        ).select('-password');
+
+        if (!updatedUser) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Courses updated successfully',
+            user: {
+                id: updatedUser._id,
+                courses: updatedUser.courses,
+                role: updatedUser.role
+            }
+        });
+    } catch (error) {
+        console.error("Courses update error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+});
+
 module.exports = router;
