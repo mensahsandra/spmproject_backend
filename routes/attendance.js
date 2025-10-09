@@ -452,88 +452,7 @@ router.get('/session/:sessionCode', async (req, res) => {
     }
 });
 
-// Get attendance records for a specific lecturer
-router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res) => {
-    try {
-        const { lecturerId } = req.params;
-        const { limit = 50, sessionCode, date } = req.query || {};
-        
-        // Security: ensure lecturer can only access their own data (unless admin)
-        if (req.user.role !== 'admin' && req.user.id !== lecturerId && req.user.name !== lecturerId) {
-            return res.status(403).json({ 
-                ok: false, 
-                message: 'Access denied. Can only view your own attendance records.' 
-            });
-        }
-        
-        const usingDb = mongoose.connection?.readyState === 1;
-        let attendanceRecords = [];
-        
-        if (usingDb) {
-            // Find sessions by lecturer name or ID
-            const sessions = await AttendanceSession.find({
-                $or: [
-                    { lecturer: lecturerId },
-                    { lecturer: req.user.name }
-                ]
-            }).lean();
-            
-            const sessionCodes = sessions.map(s => s.sessionCode);
-            
-            // Get attendance logs for these sessions
-            let query = { sessionCode: { $in: sessionCodes } };
-            if (sessionCode) query.sessionCode = sessionCode;
-            if (date) {
-                const startDate = new Date(date);
-                const endDate = new Date(startDate);
-                endDate.setDate(endDate.getDate() + 1);
-                query.timestamp = { $gte: startDate.toISOString(), $lt: endDate.toISOString() };
-            }
-            
-            attendanceRecords = await AttendanceLog.find(query)
-                .sort({ timestamp: -1 })
-                .limit(parseInt(limit))
-                .lean();
-        } else {
-            // Memory-based lookup
-            const lecturerSessions = sessionsMem.filter(s => 
-                s.lecturer === lecturerId || s.lecturer === req.user.name
-            );
-            const sessionCodes = lecturerSessions.map(s => s.sessionCode);
-            
-            attendanceRecords = attendanceLogsMem.filter(l => 
-                sessionCodes.includes(l.sessionCode)
-            ).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-            .slice(0, parseInt(limit));
-        }
-        
-        res.json({
-            ok: true,
-            lecturerId,
-            count: attendanceRecords.length,
-            records: attendanceRecords.map(record => ({
-                id: record._id || record.id,
-                studentId: record.studentId,
-                studentName: record.studentName,
-                sessionCode: record.sessionCode,
-                courseCode: record.courseCode,
-                courseName: record.courseName,
-                centre: record.centre,
-                timestamp: record.timestamp,
-                checkInTime: new Date(record.timestamp).toLocaleTimeString(),
-                checkInDate: new Date(record.timestamp).toLocaleDateString()
-            })),
-            persisted: usingDb
-        });
-    } catch (e) {
-        console.error('lecturer attendance records error:', e);
-        res.status(500).json({ 
-            ok: false, 
-            message: 'Failed to fetch attendance records', 
-            error: String(e?.message || e) 
-        });
-    }
-});
+// REMOVED: Duplicate route definition - using enhanced version below
 
 // Get session status (for real-time timer updates)
 router.get('/session/:sessionCode/status', auth(['lecturer','admin']), async (req, res) => {
@@ -590,7 +509,13 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res)
         const authenticatedUserId = req.user?.id;
         
         // Security check: lecturers can only access their own data (unless admin)
-        if (req.user.role !== 'admin' && lecturerId !== authenticatedUserId && lecturerId !== req.user?.name) {
+        // Allow access if lecturerId matches user ID, user name, or if user is admin
+        const isAuthorized = req.user.role === 'admin' || 
+                           lecturerId === authenticatedUserId || 
+                           lecturerId === req.user?.name ||
+                           lecturerId === req.user?.id;
+        
+        if (!isAuthorized) {
             return res.status(403).json({
                 success: false,
                 message: 'Access denied. Can only access your own attendance data.'
@@ -600,6 +525,8 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res)
         // Get lecturer information
         const User = require('../models/User');
         const lecturer = await User.findById(authenticatedUserId).select('-password');
+        
+        // Debug logging removed - API working correctly
         
         if (!lecturer) {
             return res.status(404).json({

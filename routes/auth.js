@@ -125,16 +125,16 @@ router.post(
                 });
             }
 
-            const { 
-                email, 
-                password, 
-                name, 
-                role = "student", 
-                studentId, 
-                staffId, 
-                course, 
-                courses, 
-                centre, 
+            const {
+                email,
+                password,
+                name,
+                role = "student",
+                studentId,
+                staffId,
+                course,
+                courses,
+                centre,
                 semester,
                 honorific,
                 title,
@@ -163,7 +163,7 @@ router.post(
                 centre,
                 semester
             };
-            
+
             // Add role-specific fields
             if (role === 'student') {
                 userData.studentId = studentId;
@@ -255,7 +255,8 @@ router.post("/add-test-users", async (req, res) => {
             courses: ['BIT364', 'BIT301', 'CS101'],
             officeLocation: 'IT Block, Room 205',
             phoneNumber: '+233-24-123-4567',
-            fullName: 'Prof. Kwabena Lecturer'
+            fullName: 'Prof. Kwabena Lecturer',
+            isActive: true
         };
 
         // Check if users exist and create/update as needed
@@ -450,7 +451,7 @@ router.get('/me-enhanced', auth(['student', 'lecturer', 'admin']), async (req, r
 });
 
 // @route   GET /api/auth/me
-// @desc    Get current authenticated user
+// @desc    Get current authenticated user with enhanced profile data
 // @access  Private
 router.get('/me', auth(['student', 'lecturer', 'admin']), async (req, res) => {
     try {
@@ -462,19 +463,44 @@ router.get('/me', auth(['student', 'lecturer', 'admin']), async (req, res) => {
             });
         }
 
+        const responseUser = {
+            id: user._id,
+            userId: user._id,
+            lecturerId: user._id, // Explicit lecturerId for attendance routes
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            centre: user.centre,
+            isActive: user.isActive !== false
+        };
+
+        // Add student-specific fields
+        if (user.role === 'student') {
+            Object.assign(responseUser, {
+                studentId: user.studentId,
+                course: user.course,
+                courses: user.courses || (user.course ? [user.course] : []),
+                semester: user.semester
+            });
+        }
+
+        // Add lecturer-specific fields with enhanced data
+        if (user.role === 'lecturer') {
+            Object.assign(responseUser, {
+                staffId: user.staffId,
+                honorific: user.honorific || 'Mr.',
+                title: user.title || 'Lecturer',
+                department: user.department || 'Information Technology',
+                courses: user.courses || ['BIT364'],
+                fullName: user.fullName || `${user.honorific || 'Mr.'} ${user.name}`,
+                officeLocation: user.officeLocation,
+                phoneNumber: user.phoneNumber
+            });
+        }
+
         res.json({
             success: true,
-            user: {
-                id: user._id,
-                email: user.email,
-                name: user.name,
-                role: user.role,
-                ...(user.studentId && { studentId: user.studentId }),
-                ...(user.staffId && { staffId: user.staffId }),
-                ...(user.course && { course: user.course }),
-                ...(user.centre && { centre: user.centre }),
-                ...(user.semester && { semester: user.semester })
-            }
+            user: responseUser
         });
     } catch (error) {
         console.error("Auth me error:", error.message);
@@ -790,6 +816,29 @@ router.get('/page-config/:role/:page', auth(['student', 'lecturer', 'admin']), a
     }
 });
 
+// @route   POST /api/auth/update-profiles
+// @desc    Update all user profiles with missing data (ADMIN ONLY)
+// @access  Private (Admin)
+router.post('/update-profiles', auth(['admin']), async (req, res) => {
+    try {
+        const updateUserProfiles = require('../scripts/updateUserProfiles');
+        const result = await updateUserProfiles();
+        
+        res.json({
+            success: true,
+            message: 'User profiles updated successfully',
+            result
+        });
+    } catch (error) {
+        console.error('Profile update error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update profiles',
+            error: error.message
+        });
+    }
+});
+
 // @route   PUT /api/auth/profile
 // @desc    Update user profile including courses
 // @access  Private
@@ -1016,51 +1065,51 @@ router.get('/lecturer/courses', auth(['lecturer', 'admin']), async (req, res) =>
 router.post('/update-user-profiles', auth(['admin']), async (req, res) => {
     try {
         const updates = [];
-        
+
         // Update all lecturers with missing fields
         const lecturers = await User.find({ role: 'lecturer' });
-        
+
         for (const lecturer of lecturers) {
             const updateFields = {};
             let needsUpdate = false;
-            
+
             // Add missing honorific
             if (!lecturer.honorific) {
                 updateFields.honorific = 'Prof.';
                 needsUpdate = true;
             }
-            
+
             // Add missing title
             if (!lecturer.title) {
                 updateFields.title = 'Senior Lecturer';
                 needsUpdate = true;
             }
-            
+
             // Add missing department
             if (!lecturer.department) {
                 updateFields.department = 'Information Technology';
                 needsUpdate = true;
             }
-            
+
             // Add missing courses (default courses for demo)
             if (!lecturer.courses || lecturer.courses.length === 0) {
                 updateFields.courses = ['BIT364', 'BIT301'];
                 needsUpdate = true;
             }
-            
+
             // Add missing fullName
             if (!lecturer.fullName) {
                 const honorific = updateFields.honorific || lecturer.honorific || 'Prof.';
                 updateFields.fullName = `${honorific} ${lecturer.name}`;
                 needsUpdate = true;
             }
-            
+
             // Add missing office location
             if (!lecturer.officeLocation) {
                 updateFields.officeLocation = 'IT Block, Room 205';
                 needsUpdate = true;
             }
-            
+
             if (needsUpdate) {
                 await User.findByIdAndUpdate(lecturer._id, updateFields);
                 updates.push({
@@ -1071,14 +1120,14 @@ router.post('/update-user-profiles', auth(['admin']), async (req, res) => {
                 });
             }
         }
-        
+
         // Update students with missing courses
         const students = await User.find({ role: 'student' });
-        
+
         for (const student of students) {
             const updateFields = {};
             let needsUpdate = false;
-            
+
             // Add missing courses array (convert single course to array)
             if (!student.courses || student.courses.length === 0) {
                 if (student.course) {
@@ -1090,7 +1139,7 @@ router.post('/update-user-profiles', auth(['admin']), async (req, res) => {
                 }
                 needsUpdate = true;
             }
-            
+
             if (needsUpdate) {
                 await User.findByIdAndUpdate(student._id, updateFields);
                 updates.push({
@@ -1101,7 +1150,7 @@ router.post('/update-user-profiles', auth(['admin']), async (req, res) => {
                 });
             }
         }
-        
+
         res.json({
             success: true,
             message: `Updated ${updates.length} user profiles`,
@@ -1111,7 +1160,7 @@ router.post('/update-user-profiles', auth(['admin']), async (req, res) => {
                 studentsUpdated: updates.filter(u => u.updatedFields.includes('courses')).length
             }
         });
-        
+
     } catch (error) {
         console.error("Update user profiles error:", error.message);
         res.status(500).json({
@@ -1128,7 +1177,7 @@ router.post('/update-user-profiles', auth(['admin']), async (req, res) => {
 router.post('/seed-enhanced-users', async (req, res) => {
     try {
         const salt = await bcrypt.genSalt(10);
-        
+
         // Enhanced lecturer user
         const enhancedLecturer = {
             email: 'akua.mensah@knust.edu.gh',
@@ -1145,7 +1194,7 @@ router.post('/seed-enhanced-users', async (req, res) => {
             phoneNumber: '+233-24-567-8901',
             fullName: 'Prof. Akua Mensah'
         };
-        
+
         // Enhanced student user
         const enhancedStudent = {
             email: 'student.enhanced@knust.edu.gh',
@@ -1158,20 +1207,20 @@ router.post('/seed-enhanced-users', async (req, res) => {
             centre: 'Kumasi',
             semester: 'Spring 2025'
         };
-        
+
         // Create or update users
         const lecturerResult = await User.findOneAndUpdate(
             { email: enhancedLecturer.email },
             enhancedLecturer,
             { upsert: true, new: true }
         );
-        
+
         const studentResult = await User.findOneAndUpdate(
             { email: enhancedStudent.email },
             enhancedStudent,
             { upsert: true, new: true }
         );
-        
+
         res.json({
             success: true,
             message: 'Enhanced test users created/updated',
@@ -1200,7 +1249,7 @@ router.post('/seed-enhanced-users', async (req, res) => {
                 }
             }
         });
-        
+
     } catch (error) {
         console.error("Seed enhanced users error:", error.message);
         res.status(500).json({

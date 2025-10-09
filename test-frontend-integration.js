@@ -1,7 +1,7 @@
 // Test script to verify frontend-backend integration
-const https = require('https');
+const http = require('http');
 
-const BASE_URL = 'https://spmproject-backend.vercel.app';
+const BASE_URL = 'http://localhost:3000';
 
 function testEndpoint(path, method = 'GET', headers = {}, data = null) {
   return new Promise((resolve, reject) => {
@@ -9,7 +9,7 @@ function testEndpoint(path, method = 'GET', headers = {}, data = null) {
     
     const options = {
       hostname: url.hostname,
-      port: 443,
+      port: url.port || 3000,
       path: url.pathname + url.search,
       method: method,
       headers: {
@@ -18,7 +18,7 @@ function testEndpoint(path, method = 'GET', headers = {}, data = null) {
       }
     };
 
-    const req = https.request(options, (res) => {
+    const req = http.request(options, (res) => {
       let body = '';
       res.on('data', (chunk) => {
         body += chunk;
@@ -123,6 +123,7 @@ async function testFrontendIntegration() {
       if (attendanceResult.success) {
         console.log('   ✅ Attendance API working');
         console.log('   👤 Lecturer Name:', attendanceResult.data.lecturer?.name);
+        console.log('   🎓 Full Name:', attendanceResult.data.lecturer?.fullName);
         console.log('   📚 Courses:', attendanceResult.data.lecturer?.courses);
         console.log('   📊 Current Session:', attendanceResult.data.currentSession?.courseCode || 'None');
         console.log('   📈 Total Records:', attendanceResult.data.records?.length || 0);
