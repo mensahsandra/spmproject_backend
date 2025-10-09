@@ -1213,105 +1213,72 @@ router.get('/lecturer/:lecturerId/records', auth(['lecturer','admin']), async (r
     }
 });
 
-// Test endpoint to simulate student check-ins (DEVELOPMENT ONLY)
-router.post('/simulate-checkin', async (req, res) => {
+// @route   POST /api/attendance/clear-sample-data
+// @desc    Clear all sample/demo attendance data (ADMIN ONLY)
+// @access  Private (Admin only)
+router.post('/clear-sample-data', auth(['admin']), async (req, res) => {
     try {
-        const { sessionCode, count = 1 } = req.body || {};
-        
-        if (!sessionCode) {
-            return res.status(400).json({ ok: false, message: 'sessionCode is required' });
-        }
-        
-        // Verify session exists
         const usingDb = mongoose.connection?.readyState === 1;
-        let session = null;
+        let clearedSessions = 0;
+        let clearedLogs = 0;
         
         if (usingDb) {
-            session = await AttendanceSession.findOne({ sessionCode }).lean();
-        } else {
-            session = sessionsMem.find(s => s.sessionCode === sessionCode);
-        }
-        
-        if (!session) {
-            return res.status(404).json({ ok: false, message: 'Session not found' });
-        }
-        
-        // Generate fake student check-ins
-        const fakeStudents = [
-            { id: 'S1001', name: 'Alice Johnson', centre: 'Kumasi' },
-            { id: 'S1002', name: 'Bob Smith', centre: 'Accra' },
-            { id: 'S1003', name: 'Carol Davis', centre: 'Kumasi' },
-            { id: 'S1004', name: 'David Wilson', centre: 'Takoradi' },
-            { id: 'S1005', name: 'Eva Brown', centre: 'Kumasi' },
-            { id: 'S1006', name: 'Frank Miller', centre: 'Accra' },
-            { id: 'S1007', name: 'Grace Lee', centre: 'Kumasi' },
-            { id: 'S1008', name: 'Henry Taylor', centre: 'Cape Coast' }
-        ];
-        
-        const createdEntries = [];
-        const numToCreate = Math.min(parseInt(count), fakeStudents.length);
-        
-        for (let i = 0; i < numToCreate; i++) {
-            const student = fakeStudents[i];
-            const attendanceEntry = {
-                studentId: student.id,
-                studentName: student.name,
-                sessionCode,
-                courseCode: session.courseCode,
-                courseName: session.courseName,
-                lecturer: session.lecturer,
-                centre: student.centre,
-                timestamp: new Date().toISOString(),
-                checkInMethod: 'SIMULATED'
-            };
+            // Clear sample sessions and logs from database
+            const sessionResult = await AttendanceSession.deleteMany({
+                $or: [
+                    { lecturer: 'Kwabena Lecturer' },
+                    { lecturer: 'Prof. Anyimadu' },
+                    { courseCode: 'DEMO' }
+                ]
+            });
             
-            if (usingDb) {
-                // Check if already exists
-                const existing = await AttendanceLog.findOne({ 
-                    sessionCode, 
-                    studentId: student.id 
-                });
-                
-                if (!existing) {
-                    const created = await AttendanceLog.create(attendanceEntry);
-                    createdEntries.push(created);
-                }
-            } else {
-                const exists = attendanceLogsMem.find(l => 
-                    l.sessionCode === sessionCode && l.studentId === student.id
-                );
-                
-                if (!exists) {
-                    const newEntry = { id: Date.now().toString(36) + i, ...attendanceEntry };
-                    attendanceLogsMem.push(newEntry);
-                    createdEntries.push(newEntry);
-                }
-            }
+            const logResult = await AttendanceLog.deleteMany({
+                $or: [
+                    { studentId: { $in: ['S1001', 'S1002', 'S1003', 'S1004', 'S1005', 'S1006', 'S1007', 'S1008'] } },
+                    { studentName: { $regex: /(Alice Johnson|Bob Smith|Carol Davis|David Wilson|Eva Brown|Frank Miller|Grace Lee|Henry Taylor)/ } },
+                    { checkInMethod: 'SIMULATED' }
+                ]
+            });
             
-            // Add small delay between entries
-            await new Promise(resolve => setTimeout(resolve, 100));
+            clearedSessions = sessionResult.deletedCount;
+            clearedLogs = logResult.deletedCount;
         }
+        
+        // Clear in-memory sample data
+        const memorySessionsBefore = sessionsMem.length;
+        const memoryLogsBefore = attendanceLogsMem.length;
+        
+        // Clear in-memory arrays
+        sessionsMem.length = 0;
+        attendanceLogsMem.length = 0;
         
         res.json({
             ok: true,
-            message: `Simulated ${createdEntries.length} student check-ins`,
-            sessionCode,
-            created: createdEntries.length,
-            entries: createdEntries.map(entry => ({
-                studentId: entry.studentId,
-                studentName: entry.studentName,
-                centre: entry.centre,
-                timestamp: entry.timestamp
-            }))
+            message: 'Sample data cleared successfully',
+            cleared: {
+                database: {
+                    sessions: clearedSessions,
+                    logs: clearedLogs
+                },
+                memory: {
+                    sessions: memorySessionsBefore,
+                    logs: memoryLogsBefore
+                }
+            },
+            note: 'Only real student check-ins will now appear in attendance records'
         });
-    } catch (e) {
-        console.error('simulate check-in error:', e);
-        res.status(500).json({ 
-            ok: false, 
-            message: 'Failed to simulate check-ins', 
-            error: String(e?.message || e) 
+        
+    } catch (error) {
+        console.error('Clear sample data error:', error);
+        res.status(500).json({
+            ok: false,
+            message: 'Failed to clear sample data',
+            error: error.message
         });
     }
 });
+
+// Fake student simulation endpoint removed - now using real student data only
+// Students must scan QR codes to check in and appear in attendance records
 
 module.exports = router;
