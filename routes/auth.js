@@ -125,7 +125,23 @@ router.post(
                 });
             }
 
-            const { email, password, name, role = "student", studentId, staffId, course, centre, semester } = req.body;
+            const { 
+                email, 
+                password, 
+                name, 
+                role = "student", 
+                studentId, 
+                staffId, 
+                course, 
+                courses, 
+                centre, 
+                semester,
+                honorific,
+                title,
+                department,
+                officeLocation,
+                phoneNumber
+            } = req.body;
             const existingUser = await User.findOne({ email: email.toLowerCase() });
             if (existingUser) {
                 return res.status(400).json({
@@ -138,15 +154,33 @@ router.post(
             const salt = await bcrypt.genSalt(10);
             const hashedPassword = await bcrypt.hash(password, salt);
 
-            const newUser = await User.create({
+            // Prepare user data with enhanced fields
+            const userData = {
                 email: email.toLowerCase(),
                 password: hashedPassword,
                 name,
                 role,
-                studentId: role === 'student' ? studentId : undefined,
-                staffId: role === 'lecturer' ? staffId : undefined,
-                course, centre, semester,
-            });
+                centre,
+                semester
+            };
+            
+            // Add role-specific fields
+            if (role === 'student') {
+                userData.studentId = studentId;
+                userData.course = course; // Legacy field
+                userData.courses = courses || (course ? [course] : []); // New array field
+            } else if (role === 'lecturer') {
+                userData.staffId = staffId;
+                userData.honorific = honorific || 'Mr.';
+                userData.title = title || 'Lecturer';
+                userData.department = department || 'Information Technology';
+                userData.courses = courses || [];
+                userData.fullName = `${honorific || 'Mr.'} ${name}`;
+                userData.officeLocation = officeLocation;
+                userData.phoneNumber = phoneNumber;
+            }
+
+            const newUser = await User.create(userData);
 
             // Create JWT payload
             const payload = {
@@ -972,6 +1006,207 @@ router.get('/lecturer/courses', auth(['lecturer', 'admin']), async (req, res) =>
         res.status(500).json({
             success: false,
             message: "Server error"
+        });
+    }
+});
+
+// @route   POST /api/auth/update-user-profiles
+// @desc    Update existing users with missing profile fields (ADMIN ONLY)
+// @access  Private (Admin only)
+router.post('/update-user-profiles', auth(['admin']), async (req, res) => {
+    try {
+        const updates = [];
+        
+        // Update all lecturers with missing fields
+        const lecturers = await User.find({ role: 'lecturer' });
+        
+        for (const lecturer of lecturers) {
+            const updateFields = {};
+            let needsUpdate = false;
+            
+            // Add missing honorific
+            if (!lecturer.honorific) {
+                updateFields.honorific = 'Prof.';
+                needsUpdate = true;
+            }
+            
+            // Add missing title
+            if (!lecturer.title) {
+                updateFields.title = 'Senior Lecturer';
+                needsUpdate = true;
+            }
+            
+            // Add missing department
+            if (!lecturer.department) {
+                updateFields.department = 'Information Technology';
+                needsUpdate = true;
+            }
+            
+            // Add missing courses (default courses for demo)
+            if (!lecturer.courses || lecturer.courses.length === 0) {
+                updateFields.courses = ['BIT364', 'BIT301'];
+                needsUpdate = true;
+            }
+            
+            // Add missing fullName
+            if (!lecturer.fullName) {
+                const honorific = updateFields.honorific || lecturer.honorific || 'Prof.';
+                updateFields.fullName = `${honorific} ${lecturer.name}`;
+                needsUpdate = true;
+            }
+            
+            // Add missing office location
+            if (!lecturer.officeLocation) {
+                updateFields.officeLocation = 'IT Block, Room 205';
+                needsUpdate = true;
+            }
+            
+            if (needsUpdate) {
+                await User.findByIdAndUpdate(lecturer._id, updateFields);
+                updates.push({
+                    userId: lecturer._id,
+                    name: lecturer.name,
+                    email: lecturer.email,
+                    updatedFields: Object.keys(updateFields)
+                });
+            }
+        }
+        
+        // Update students with missing courses
+        const students = await User.find({ role: 'student' });
+        
+        for (const student of students) {
+            const updateFields = {};
+            let needsUpdate = false;
+            
+            // Add missing courses array (convert single course to array)
+            if (!student.courses || student.courses.length === 0) {
+                if (student.course) {
+                    // Convert single course to courses array
+                    updateFields.courses = [student.course];
+                } else {
+                    // Default course for students
+                    updateFields.courses = ['BIT364'];
+                }
+                needsUpdate = true;
+            }
+            
+            if (needsUpdate) {
+                await User.findByIdAndUpdate(student._id, updateFields);
+                updates.push({
+                    userId: student._id,
+                    name: student.name,
+                    email: student.email,
+                    updatedFields: Object.keys(updateFields)
+                });
+            }
+        }
+        
+        res.json({
+            success: true,
+            message: `Updated ${updates.length} user profiles`,
+            updates: updates,
+            summary: {
+                lecturersUpdated: updates.filter(u => u.updatedFields.includes('honorific')).length,
+                studentsUpdated: updates.filter(u => u.updatedFields.includes('courses')).length
+            }
+        });
+        
+    } catch (error) {
+        console.error("Update user profiles error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Failed to update user profiles",
+            error: error.message
+        });
+    }
+});
+
+// @route   POST /api/auth/seed-enhanced-users
+// @desc    Create enhanced test users with all profile fields
+// @access  Public (for testing)
+router.post('/seed-enhanced-users', async (req, res) => {
+    try {
+        const salt = await bcrypt.genSalt(10);
+        
+        // Enhanced lecturer user
+        const enhancedLecturer = {
+            email: 'akua.mensah@knust.edu.gh',
+            password: await bcrypt.hash('password123!', salt),
+            name: 'Akua Mensah',
+            role: 'lecturer',
+            staffId: 'STF456',
+            centre: 'Kumasi',
+            honorific: 'Prof.',
+            title: 'Senior Lecturer',
+            department: 'Information Technology',
+            courses: ['BIT364', 'BIT301', 'CS201'],
+            officeLocation: 'IT Block, Room 301',
+            phoneNumber: '+233-24-567-8901',
+            fullName: 'Prof. Akua Mensah'
+        };
+        
+        // Enhanced student user
+        const enhancedStudent = {
+            email: 'student.enhanced@knust.edu.gh',
+            password: await bcrypt.hash('password0!', salt),
+            name: 'Enhanced Student',
+            role: 'student',
+            studentId: 'STU2025001',
+            course: 'Information Technology', // Legacy field
+            courses: ['BIT364', 'BIT301'], // New array field
+            centre: 'Kumasi',
+            semester: 'Spring 2025'
+        };
+        
+        // Create or update users
+        const lecturerResult = await User.findOneAndUpdate(
+            { email: enhancedLecturer.email },
+            enhancedLecturer,
+            { upsert: true, new: true }
+        );
+        
+        const studentResult = await User.findOneAndUpdate(
+            { email: enhancedStudent.email },
+            enhancedStudent,
+            { upsert: true, new: true }
+        );
+        
+        res.json({
+            success: true,
+            message: 'Enhanced test users created/updated',
+            users: {
+                lecturer: {
+                    email: lecturerResult.email,
+                    name: lecturerResult.name,
+                    fullName: lecturerResult.fullName,
+                    honorific: lecturerResult.honorific,
+                    courses: lecturerResult.courses
+                },
+                student: {
+                    email: studentResult.email,
+                    name: studentResult.name,
+                    courses: studentResult.courses
+                }
+            },
+            loginCredentials: {
+                lecturer: {
+                    email: 'akua.mensah@knust.edu.gh',
+                    password: 'password123!'
+                },
+                student: {
+                    email: 'student.enhanced@knust.edu.gh',
+                    password: 'password0!'
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error("Seed enhanced users error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Failed to create enhanced users",
+            error: error.message
         });
     }
 });
