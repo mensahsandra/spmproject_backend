@@ -600,6 +600,7 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res)
             lecturer: {
                 name: lecturer?.name || 'Unknown Lecturer',
                 id: lecturer?._id || 'unknown',
+                lecturerId: lecturer?._id || 'unknown', // Explicit lecturerId for frontend
                 email: lecturer?.email || 'N/A',
                 staffId: lecturer?.staffId || 'N/A',
                 courses: lecturerCourses,
@@ -608,7 +609,11 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res)
                 honorific: lecturer?.honorific || 'Mr.',
                 fullName: lecturer?.fullName || `${lecturer?.honorific || 'Mr.'} ${lecturer?.name || 'Unknown Lecturer'}`,
                 department: getDepartmentFullName(lecturer?.department || 'Information Technology'),
-                title: lecturer?.title || 'Lecturer'
+                title: lecturer?.title || 'Lecturer',
+                // Additional fields for frontend display
+                course: coursesWithDetails.length > 0 ? coursesWithDetails[0].fullName : 'No Course Assigned',
+                classRep: 'Not Assigned', // This would come from course enrollment data
+                totalAttendees: attendanceLogs.length
             },
             currentSession: activeSession ? {
                 courseCode: activeSession.courseCode,
@@ -663,6 +668,69 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res)
             success: false,
             message: 'Failed to fetch lecturer attendance data',
             error: error.message
+        });
+    }
+});
+
+// Real-time attendance notifications for lecturers
+router.get('/notifications/:lecturerId', auth(['lecturer','admin']), async (req, res) => {
+    try {
+        const { lecturerId } = req.params;
+        
+        // Security check
+        if (req.user.role !== 'admin' && req.user.id !== lecturerId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied'
+            });
+        }
+        
+        // Get recent attendance (last 5 minutes) for notifications
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        let recentAttendance = [];
+        
+        if (usingDb) {
+            // Get lecturer's sessions
+            const User = require('../models/User');
+            const lecturer = await User.findById(lecturerId).select('name');
+            
+            if (lecturer) {
+                const sessions = await AttendanceSession.find({ 
+                    lecturer: lecturer.name 
+                }).lean();
+                
+                const sessionCodes = sessions.map(s => s.sessionCode);
+                
+                recentAttendance = await AttendanceLog.find({
+                    sessionCode: { $in: sessionCodes },
+                    timestamp: { $gte: fiveMinutesAgo.toISOString() }
+                }).sort({ timestamp: -1 }).lean();
+            }
+        }
+        
+        res.json({
+            success: true,
+            notifications: recentAttendance.map(log => ({
+                id: log._id,
+                message: `${log.studentName || 'Student'} (${log.studentId}) checked in to ${log.courseName}`,
+                studentName: log.studentName,
+                studentId: log.studentId,
+                courseCode: log.courseCode,
+                courseName: log.courseName,
+                timestamp: log.timestamp,
+                timeAgo: Math.floor((Date.now() - new Date(log.timestamp).getTime()) / 1000 / 60) + ' minutes ago'
+            })),
+            count: recentAttendance.length,
+            lastCheck: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('Notifications error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to get notifications'
         });
     }
 });
