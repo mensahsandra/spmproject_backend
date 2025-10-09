@@ -34,9 +34,155 @@ router.get('/health', (req, res) => {
             '/api/grades/academic-years',
             '/api/grades/semesters', 
             '/api/grades/select-result-data',
-            '/api/grades/student-results'
+            '/api/grades/student-results',
+            '/api/grades/student/:studentId'
         ]
     });
+});
+
+// @route   GET /api/grades/student/:studentId
+// @desc    Get student grades (Enhanced for results integration)
+// @access  Private (Student, Lecturer, Admin)
+router.get('/student/:studentId', async (req, res) => {
+    try {
+        const { studentId } = req.params;
+        const { year, semester, courseCode } = req.query;
+        
+        // Filter grades from store by studentId
+        let studentGrades = gradeStore.filter(grade => 
+            grade.studentId === studentId || grade.studentId === String(studentId)
+        );
+
+        // Apply filters
+        if (courseCode) {
+            studentGrades = studentGrades.filter(grade => grade.courseCode === courseCode);
+        }
+
+        if (year) {
+            studentGrades = studentGrades.filter(grade => {
+                const gradeYear = new Date(grade.submissionDate).getFullYear();
+                return gradeYear === parseInt(year);
+            });
+        }
+
+        // Get course mapping for full names
+        let mapCoursesToFullDetails;
+        try {
+            mapCoursesToFullDetails = require('../config/courseMapping').mapCoursesToFullDetails;
+        } catch (error) {
+            mapCoursesToFullDetails = (courses) => courses.map(c => ({ code: c, fullName: c }));
+        }
+
+        // Format grades for frontend
+        const formattedGrades = studentGrades.map(grade => {
+            const courseDetails = mapCoursesToFullDetails([grade.courseCode])[0] || {
+                code: grade.courseCode,
+                fullName: grade.courseCode
+            };
+
+            // Map assessment type
+            let assessmentType = 'Assessment';
+            if (grade.assessmentType?.toLowerCase().includes('assignment')) assessmentType = 'Assignment';
+            else if (grade.assessmentType?.toLowerCase().includes('midterm') || grade.assessmentType?.toLowerCase().includes('mid')) assessmentType = 'Mid Semester';
+            else if (grade.assessmentType?.toLowerCase().includes('final') || grade.assessmentType?.toLowerCase().includes('end')) assessmentType = 'End of Semester';
+            else if (grade.assessmentType?.toLowerCase().includes('project') || grade.assessmentType?.toLowerCase().includes('group')) assessmentType = 'Group Work';
+
+            // Calculate GPA
+            const gpa = grade.percentage >= 90 ? 4.0 : 
+                       grade.percentage >= 85 ? 3.7 :
+                       grade.percentage >= 80 ? 3.3 :
+                       grade.percentage >= 75 ? 3.0 :
+                       grade.percentage >= 70 ? 2.7 :
+                       grade.percentage >= 65 ? 2.3 :
+                       grade.percentage >= 60 ? 2.0 :
+                       grade.percentage >= 55 ? 1.7 :
+                       grade.percentage >= 50 ? 1.3 :
+                       grade.percentage >= 45 ? 1.0 :
+                       grade.percentage >= 40 ? 0.7 : 0.0;
+
+            return {
+                id: `${grade.courseCode}-${grade.studentId}-${grade.assessmentType}`,
+                courseCode: grade.courseCode,
+                courseName: courseDetails.fullName,
+                assessmentType,
+                assessmentTitle: grade.assessmentType,
+                score: grade.score,
+                totalMarks: grade.maxScore,
+                percentage: grade.percentage,
+                letterGrade: grade.grade,
+                gpa,
+                submittedAt: grade.submissionDate,
+                gradedAt: grade.submissionDate,
+                feedback: grade.feedback,
+                lecturer: grade.lecturer,
+                semester: semester || 'Current',
+                year: year || new Date(grade.submissionDate).getFullYear()
+            };
+        });
+
+        // Group by course for summary
+        const byCourse = {};
+        formattedGrades.forEach(grade => {
+            if (!byCourse[grade.courseCode]) {
+                byCourse[grade.courseCode] = {
+                    courseCode: grade.courseCode,
+                    courseName: grade.courseName,
+                    grades: [],
+                    totalPoints: 0,
+                    totalCredits: 0
+                };
+            }
+            byCourse[grade.courseCode].grades.push(grade);
+            byCourse[grade.courseCode].totalPoints += grade.gpa;
+            byCourse[grade.courseCode].totalCredits += 1;
+        });
+
+        // Calculate course summaries
+        const courseSummaries = Object.values(byCourse).map(course => ({
+            courseCode: course.courseCode,
+            courseName: course.courseName,
+            assessmentCount: course.grades.length,
+            averageGPA: course.totalCredits > 0 ? 
+                (course.totalPoints / course.totalCredits).toFixed(2) : '0.00',
+            averagePercentage: course.grades.length > 0 ?
+                Math.round(course.grades.reduce((sum, g) => sum + g.percentage, 0) / course.grades.length) : 0
+        }));
+
+        // Calculate overall GPA
+        const totalPoints = formattedGrades.reduce((sum, g) => sum + g.gpa, 0);
+        const totalCredits = formattedGrades.length;
+        const overallGPA = totalCredits > 0 ? (totalPoints / totalCredits).toFixed(2) : '0.00';
+
+        // Get student info from grades
+        const studentInfo = studentGrades.length > 0 ? {
+            studentId: studentGrades[0].studentId,
+            name: studentGrades[0].studentName
+        } : { studentId };
+
+        res.json({
+            success: true,
+            student: studentInfo,
+            filters: { year, semester, courseCode },
+            grades: formattedGrades.sort((a, b) => new Date(b.submittedAt) - new Date(a.submittedAt)),
+            courseSummaries,
+            summary: {
+                totalAssessments: formattedGrades.length,
+                totalCourses: Object.keys(byCourse).length,
+                overallGPA: parseFloat(overallGPA),
+                averagePercentage: formattedGrades.length > 0 ?
+                    Math.round(formattedGrades.reduce((sum, g) => sum + g.percentage, 0) / formattedGrades.length) : 0,
+                lastGraded: formattedGrades.length > 0 ? formattedGrades[0].gradedAt : null
+            }
+        });
+
+    } catch (error) {
+        console.error('Get student grades error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch student grades',
+            error: error.message
+        });
+    }
 });
 
 // Lecturer: list grades (optionally filter by courseCode)

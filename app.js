@@ -135,6 +135,9 @@ app.use("/api/quizzes", require("./routes/quizzes"));
 app.use("/api/cwa", require("./routes/cwa"));
 app.use("/api/deadlines", require("./routes/deadlines"));
 
+// Student results aggregation routes
+app.use("/api/results", require("./routes/results"));
+
 // Preflight support (explicit for some environments)
 app.options('*', cors());
 

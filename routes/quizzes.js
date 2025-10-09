@@ -14,6 +14,125 @@ router.get('/test', (req, res) => {
   });
 });
 
+// @route   GET /api/quizzes/submissions/student/:studentId
+// @desc    Get all quiz submissions for a student (Enhanced for results integration)
+// @access  Private (Student, Lecturer, Admin)
+router.get('/submissions/student/:studentId', async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { year, semester, courseCode } = req.query;
+    
+    // Import models (with error handling)
+    let Quiz, QuizSubmission;
+    try {
+      Quiz = require('../models/Quiz');
+      QuizSubmission = require('../models/QuizSubmission');
+    } catch (error) {
+      console.log('Models not available, using mock data');
+      return res.json({
+        success: true,
+        studentId,
+        submissions: [],
+        message: 'Models not available - using mock data',
+        mock: true
+      });
+    }
+
+    // Build query filters
+    let query = { studentId };
+    
+    if (courseCode) {
+      const courseQuizzes = await Quiz.find({ courseCode }).select('_id').lean();
+      const quizIds = courseQuizzes.map(q => q._id);
+      query.quizId = { $in: quizIds };
+    }
+    
+    if (year) {
+      const startDate = new Date(`${year}-01-01`);
+      const endDate = new Date(`${parseInt(year) + 1}-01-01`);
+      query.submittedAt = { $gte: startDate, $lt: endDate };
+    }
+
+    const submissions = await QuizSubmission.find(query)
+      .populate('quizId', 'title courseCode courseName totalMarks timeLimit createdAt')
+      .sort({ submittedAt: -1 })
+      .lean();
+
+    // Get course mapping for full names
+    let mapCoursesToFullDetails;
+    try {
+      mapCoursesToFullDetails = require('../config/courseMapping').mapCoursesToFullDetails;
+    } catch (error) {
+      mapCoursesToFullDetails = (courses) => courses.map(c => ({ code: c, fullName: c }));
+    }
+
+    const formattedSubmissions = submissions.map(submission => {
+      const quiz = submission.quizId;
+      if (!quiz) return null;
+
+      // Map quiz type to assessment type for frontend
+      let assessmentType = 'Assessment'; // Default for quizzes
+      if (quiz.title?.toLowerCase().includes('assignment')) assessmentType = 'Assignment';
+      else if (quiz.title?.toLowerCase().includes('midterm') || quiz.title?.toLowerCase().includes('mid')) assessmentType = 'Mid Semester';
+      else if (quiz.title?.toLowerCase().includes('final') || quiz.title?.toLowerCase().includes('end')) assessmentType = 'End of Semester';
+      else if (quiz.title?.toLowerCase().includes('group')) assessmentType = 'Group Work';
+
+      // Get full course name
+      const courseDetails = mapCoursesToFullDetails([quiz.courseCode])[0] || {
+        code: quiz.courseCode,
+        fullName: quiz.courseName || quiz.courseCode
+      };
+
+      return {
+        id: submission._id,
+        quiz: {
+          id: quiz._id,
+          title: quiz.title,
+          courseCode: quiz.courseCode,
+          courseName: courseDetails.fullName,
+          totalMarks: quiz.totalMarks,
+          createdAt: quiz.createdAt
+        },
+        assessmentType,
+        score: submission.score || 0,
+        totalMarks: quiz.totalMarks || 100,
+        percentage: quiz.totalMarks ? 
+          Math.round((submission.score / quiz.totalMarks) * 100) : 0,
+        answers: submission.answers,
+        submittedAt: submission.submittedAt,
+        gradedAt: submission.gradedAt,
+        status: submission.status || 'completed',
+        feedback: submission.feedback,
+        timeSpent: submission.timeSpent,
+        grade: submission.score >= (quiz.totalMarks * 0.7) ? 'A' : 
+               submission.score >= (quiz.totalMarks * 0.6) ? 'B' : 
+               submission.score >= (quiz.totalMarks * 0.5) ? 'C' : 
+               submission.score >= (quiz.totalMarks * 0.4) ? 'D' : 'F'
+      };
+    }).filter(Boolean);
+
+    res.json({
+      success: true,
+      studentId,
+      filters: { year, semester, courseCode },
+      submissions: formattedSubmissions,
+      summary: {
+        totalSubmissions: formattedSubmissions.length,
+        overallAverage: formattedSubmissions.length > 0 ? 
+          Math.round(formattedSubmissions.reduce((sum, s) => sum + s.percentage, 0) / formattedSubmissions.length) : 0
+      }
+    });
+
+  } catch (error) {
+    console.error('Get student submissions error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch student submissions',
+      error: error.message
+    });
+  }
+});
+
 // Minimal quiz creation endpoint (no auth, no database, no file upload)
 router.post('/create-minimal', (req, res) => {
   console.log('🧪 MINIMAL quiz creation endpoint hit');
