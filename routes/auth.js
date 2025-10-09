@@ -513,11 +513,18 @@ router.get('/lecturer/profile', auth(['lecturer', 'admin']), async (req, res) =>
                 id: user._id,
                 email: user.email,
                 name: user.name,
+                fullName: user.fullName || `${user.honorific || 'Mr.'} ${user.name}`,
+                honorific: user.honorific || 'Mr.',
                 role: user.role,
                 staffId: user.staffId || 'N/A',
                 centre: user.centre || 'Not specified',
-                department: user.department || 'Not specified',
-                courses: user.courses || []
+                department: user.department || 'Information Technology',
+                title: user.title || 'Lecturer',
+                courses: user.courses || [],
+                courseAssignments: user.teachingAssignments || [],
+                officeLocation: user.officeLocation,
+                phoneNumber: user.phoneNumber,
+                avatar: user.avatar
             }
         });
     } catch (error) {
@@ -886,6 +893,82 @@ router.patch('/courses', auth(['student', 'lecturer', 'admin']), async (req, res
         });
     } catch (error) {
         console.error("Courses update error:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+});
+
+// @route   GET /api/auth/lecturer/courses
+// @desc    Get lecturer's assigned courses (for frontend dropdowns)
+// @access  Private (Lecturer only)
+router.get('/lecturer/courses', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id).select('-password').lean();
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "Lecturer not found"
+            });
+        }
+
+        if (user.role !== 'lecturer' && user.role !== 'admin') {
+            return res.status(403).json({
+                success: false,
+                message: "Access denied. Lecturer role required."
+            });
+        }
+
+        // Get course details for assigned courses
+        const Course = require('../models/Course');
+        let courseDetails = [];
+        
+        if (user.courses && user.courses.length > 0) {
+            courseDetails = await Course.find({
+                code: { $in: user.courses },
+                isActive: true
+            }).select('code name department credits description').lean();
+        }
+        
+        // If no courses assigned, provide default courses for demo
+        if (courseDetails.length === 0) {
+            courseDetails = [
+                {
+                    code: 'BIT364',
+                    name: 'Business Information Technology',
+                    department: 'Information Technology',
+                    credits: 3,
+                    description: 'Introduction to business applications of information technology'
+                },
+                {
+                    code: 'BIT301',
+                    name: 'Database Management Systems',
+                    department: 'Information Technology',
+                    credits: 3,
+                    description: 'Comprehensive study of database design and implementation'
+                }
+            ];
+        }
+
+        res.json({
+            success: true,
+            lecturer: {
+                id: user._id,
+                name: user.name,
+                fullName: user.fullName || `${user.honorific || 'Mr.'} ${user.name}`
+            },
+            courses: courseDetails.map(course => ({
+                code: course.code,
+                name: course.name,
+                department: course.department,
+                credits: course.credits,
+                description: course.description
+            })),
+            totalCourses: courseDetails.length
+        });
+    } catch (error) {
+        console.error("Lecturer courses fetch error:", error.message);
         res.status(500).json({
             success: false,
             message: "Server error"

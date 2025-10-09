@@ -583,6 +583,135 @@ router.get('/session/:sessionCode/status', auth(['lecturer','admin']), async (re
     }
 });
 
+// Enhanced lecturer attendance API for frontend (matches frontend requirements)
+router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res) => {
+    try {
+        const { lecturerId } = req.params;
+        const authenticatedUserId = req.user?.id;
+        
+        // Security check: lecturers can only access their own data (unless admin)
+        if (req.user.role !== 'admin' && lecturerId !== authenticatedUserId && lecturerId !== req.user?.name) {
+            return res.status(403).json({
+                success: false,
+                message: 'Access denied. Can only access your own attendance data.'
+            });
+        }
+        
+        // Get lecturer information
+        const User = require('../models/User');
+        const lecturer = await User.findById(authenticatedUserId).select('-password');
+        
+        if (!lecturer) {
+            return res.status(404).json({
+                success: false,
+                message: 'Lecturer not found'
+            });
+        }
+        
+        const usingDb = mongoose.connection?.readyState === 1;
+        let sessions = [];
+        let attendanceLogs = [];
+        
+        if (usingDb) {
+            // Get sessions created by this lecturer
+            sessions = await AttendanceSession.find({ 
+                lecturer: lecturer.name 
+            }).sort({ issuedAt: -1 }).limit(10).lean();
+            
+            // Get attendance logs for these sessions
+            if (sessions.length > 0) {
+                const sessionCodes = sessions.map(s => s.sessionCode);
+                attendanceLogs = await AttendanceLog.find({
+                    sessionCode: { $in: sessionCodes }
+                }).sort({ timestamp: -1 }).lean();
+            }
+        } else {
+            // Use in-memory data (fallback)
+            sessions = sessionsMem.filter(s => s.lecturer === lecturer.name)
+                .sort((a, b) => new Date(b.issuedAt) - new Date(a.issuedAt))
+                .slice(0, 10);
+            
+            if (sessions.length > 0) {
+                const sessionCodes = sessions.map(s => s.sessionCode);
+                attendanceLogs = attendanceLogsMem.filter(l => sessionCodes.includes(l.sessionCode))
+                    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            }
+        }
+        
+        // Get current active session
+        const now = new Date();
+        const activeSession = sessions.find(s => new Date(s.expiresAt) > now);
+        
+        // Format response to match frontend expectations
+        const response = {
+            success: true,
+            lecturer: {
+                name: lecturer.name,
+                id: lecturer._id,
+                email: lecturer.email,
+                staffId: lecturer.staffId,
+                courses: lecturer.courses || [],
+                honorific: lecturer.honorific,
+                fullName: lecturer.fullName || `${lecturer.honorific || 'Mr.'} ${lecturer.name}`,
+                department: lecturer.department
+            },
+            currentSession: activeSession ? {
+                courseCode: activeSession.courseCode,
+                courseName: activeSession.courseName,
+                sessionCode: activeSession.sessionCode,
+                issuedAt: activeSession.issuedAt,
+                expiresAt: activeSession.expiresAt,
+                attendees: attendanceLogs.filter(log => log.sessionCode === activeSession.sessionCode).map(log => ({
+                    studentId: log.studentId,
+                    studentName: log.studentName || 'Unknown Student',
+                    centre: log.centre || 'Not specified',
+                    timestamp: log.timestamp,
+                    checkInTime: new Date(log.timestamp).toLocaleTimeString()
+                }))
+            } : null,
+            records: attendanceLogs.slice(0, 50).map(log => ({
+                studentId: log.studentId,
+                studentName: log.studentName || 'Unknown Student',
+                courseCode: log.courseCode,
+                courseName: log.courseName,
+                sessionCode: log.sessionCode,
+                centre: log.centre || 'Not specified',
+                timestamp: log.timestamp,
+                checkInTime: new Date(log.timestamp).toLocaleTimeString(),
+                date: new Date(log.timestamp).toLocaleDateString()
+            })),
+            recentSessions: sessions.slice(0, 5).map(session => ({
+                sessionCode: session.sessionCode,
+                courseCode: session.courseCode,
+                courseName: session.courseName,
+                issuedAt: session.issuedAt,
+                expiresAt: session.expiresAt,
+                attendeeCount: attendanceLogs.filter(log => log.sessionCode === session.sessionCode).length
+            })),
+            totalAttendanceToday: attendanceLogs.filter(log => {
+                const logDate = new Date(log.timestamp).toDateString();
+                const today = new Date().toDateString();
+                return logDate === today;
+            }).length,
+            stats: {
+                totalSessions: sessions.length,
+                totalAttendance: attendanceLogs.length,
+                activeSessions: sessions.filter(s => new Date(s.expiresAt) > now).length
+            }
+        };
+        
+        res.json(response);
+        
+    } catch (error) {
+        console.error('Enhanced lecturer attendance error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch lecturer attendance data',
+            error: error.message
+        });
+    }
+});
+
 // Debug endpoint to check user authentication
 router.get('/debug-user', auth(['lecturer','admin']), async (req, res) => {
     try {
