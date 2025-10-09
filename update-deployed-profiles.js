@@ -20,7 +20,7 @@ async function updateDeployedProfiles() {
                     honorific: 'Prof.',
                     title: 'Senior Lecturer',
                     department: 'Information Technology',
-                    courses: ['BIT364', 'BIT301', 'CS101'],
+                    courses: ['BIT364', 'BIT301', 'IT301', 'IT401'],
                     fullName: 'Prof. Kwabena Lecturer',
                     officeLocation: 'IT Block, Room 205',
                     phoneNumber: '+233-24-123-4567',

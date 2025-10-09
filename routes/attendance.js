@@ -67,16 +67,26 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
     
     const nowIso = timestamp || new Date().toISOString();
     
-    // Enhanced entry with student information from auth
+    // Get full student information from database
+    const User = require('../models/User');
+    let studentInfo = null;
+    
+    try {
+        studentInfo = await User.findById(req.user.id).select('name studentId course centre').lean();
+    } catch (error) {
+        console.log('Could not fetch student info:', error.message);
+    }
+    
+    // Enhanced entry with complete student information
     const baseEntry = {
-        studentId: studentId || req.user.studentId,
-        studentName: req.user.name || 'Unknown Student',
+        studentId: studentId || req.user.studentId || studentInfo?.studentId,
+        studentName: studentInfo?.name || req.user.name || 'Unknown Student',
         sessionCode,
         qrRaw: qrCode || null,
         courseCode: parsed?.courseCode || session.courseCode,
         courseName: parsed?.course || parsed?.courseName || session.courseName,
         lecturer: parsed?.lecturer || parsed?.lecturerName || session.lecturer,
-        centre: centre || req.user.centre || 'Not specified',
+        centre: centre || req.user.centre || studentInfo?.centre || 'Not specified',
         location: location || null,
         timestamp: nowIso,
         checkInMethod: qrCode ? 'QR_SCAN' : 'MANUAL_CODE'
@@ -320,15 +330,25 @@ router.post('/mark', auth(['student','lecturer','admin']), async (req, res) => {
     
     const nowIso = timestamp || new Date().toISOString();
     
-    // Create attendance entry
+    // Get full student information from database
+    const User = require('../models/User');
+    let studentInfo = null;
+    
+    try {
+        studentInfo = await User.findById(req.user.id).select('name studentId course centre').lean();
+    } catch (error) {
+        console.log('Could not fetch student info:', error.message);
+    }
+    
+    // Create attendance entry with complete student information
     const attendanceEntry = {
         studentId: actualStudentId,
-        studentName: req.user.name || 'Unknown Student',
+        studentName: studentInfo?.name || req.user.name || 'Unknown Student',
         sessionCode,
         courseCode: session.courseCode,
         courseName: session.courseName,
         lecturer: session.lecturer,
-        centre: req.user.centre || 'Not specified',
+        centre: req.user.centre || studentInfo?.centre || 'Not specified',
         timestamp: nowIso,
         checkInMethod: 'MANUAL_CODE'
     };
