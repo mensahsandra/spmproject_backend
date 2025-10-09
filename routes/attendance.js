@@ -646,14 +646,14 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res)
         const response = {
             success: true,
             lecturer: {
-                name: lecturer.name,
-                id: lecturer._id,
-                email: lecturer.email,
-                staffId: lecturer.staffId,
-                courses: lecturer.courses || [],
-                honorific: lecturer.honorific,
-                fullName: lecturer.fullName || `${lecturer.honorific || 'Mr.'} ${lecturer.name}`,
-                department: lecturer.department
+                name: lecturer?.name || 'Unknown Lecturer',
+                id: lecturer?._id || 'unknown',
+                email: lecturer?.email || 'N/A',
+                staffId: lecturer?.staffId || 'N/A',
+                courses: lecturer?.courses || [],
+                honorific: lecturer?.honorific || 'Mr.',
+                fullName: lecturer?.fullName || `${lecturer?.honorific || 'Mr.'} ${lecturer?.name || 'Unknown Lecturer'}`,
+                department: lecturer?.department || 'Information Technology'
             },
             currentSession: activeSession ? {
                 courseCode: activeSession.courseCode,

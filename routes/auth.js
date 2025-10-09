@@ -923,14 +923,14 @@ router.get('/lecturer/courses', auth(['lecturer', 'admin']), async (req, res) =>
         // Get course details for assigned courses
         const Course = require('../models/Course');
         let courseDetails = [];
-        
+
         if (user.courses && user.courses.length > 0) {
             courseDetails = await Course.find({
                 code: { $in: user.courses },
                 isActive: true
             }).select('code name department credits description').lean();
         }
-        
+
         // If no courses assigned, provide default courses for demo
         if (courseDetails.length === 0) {
             courseDetails = [
