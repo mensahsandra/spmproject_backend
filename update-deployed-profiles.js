@@ -1,12 +1,18 @@
-// Update existing users with missing profile data
+// Update profiles on deployed database
 const mongoose = require('mongoose');
-const User = require('../models/User');
+const User = require('./models/User');
 
-async function updateUserProfiles() {
+async function updateDeployedProfiles() {
     try {
-        console.log('🔄 Updating user profiles with missing data...');
+        console.log('🔄 Updating deployed database profiles...');
         
-        // Update Kwabena Lecturer specifically with comprehensive course assignments
+        // Connect to the same MongoDB that the deployed app uses
+        const mongoUri = 'mongodb+srv://sandramensah243_db_user:BLfftPv57vGS28sr@studentmatrix0.39egn6a.mongodb.net/students-performance-db?retryWrites=true&w=majority';
+        
+        await mongoose.connect(mongoUri);
+        console.log('✅ Connected to deployed database');
+        
+        // Update Kwabena Lecturer specifically
         const kwabenaUpdate = await User.findOneAndUpdate(
             { email: 'kwabena@knust.edu.gh' },
             {
@@ -14,7 +20,7 @@ async function updateUserProfiles() {
                     honorific: 'Prof.',
                     title: 'Senior Lecturer',
                     department: 'Information Technology',
-                    courses: ['BIT364', 'BIT301', 'IT301', 'IT401'], // More comprehensive course list
+                    courses: ['BIT364', 'BIT301', 'CS101'],
                     fullName: 'Prof. Kwabena Lecturer',
                     officeLocation: 'IT Block, Room 205',
                     phoneNumber: '+233-24-123-4567',
@@ -25,14 +31,12 @@ async function updateUserProfiles() {
         );
 
         if (kwabenaUpdate) {
-            console.log('✅ Updated Kwabena Lecturer profile:', {
+            console.log('✅ Updated Kwabena Lecturer profile on deployed DB:', {
                 name: kwabenaUpdate.name,
                 honorific: kwabenaUpdate.honorific,
                 courses: kwabenaUpdate.courses,
                 fullName: kwabenaUpdate.fullName
             });
-        } else {
-            console.log('⚠️ Kwabena Lecturer not found - will be created on next login');
         }
 
         // Update all lecturers with missing honorifics
@@ -55,29 +59,6 @@ async function updateUserProfiles() {
         );
 
         console.log(`✅ Updated ${lecturerUpdates.modifiedCount} lecturers with missing honorifics`);
-
-        // Update all students with missing courses array
-        const studentUpdates = await User.updateMany(
-            { 
-                role: 'student',
-                courses: { $exists: false }
-            },
-            [
-                {
-                    $set: {
-                        courses: {
-                            $cond: {
-                                if: { $ne: ['$course', null] },
-                                then: ['$course'],
-                                else: []
-                            }
-                        }
-                    }
-                }
-            ]
-        );
-
-        console.log(`✅ Updated ${studentUpdates.modifiedCount} students with courses array`);
 
         // Update all users with missing fullName
         const fullNameUpdates = await User.updateMany(
@@ -106,39 +87,39 @@ async function updateUserProfiles() {
 
         console.log(`✅ Updated ${fullNameUpdates.modifiedCount} lecturers with fullName`);
 
-        console.log('🎉 Profile update completed successfully!');
+        console.log('🎉 Deployed database update completed!');
         
-        return {
-            success: true,
-            kwabenaUpdated: !!kwabenaUpdate,
-            lecturersUpdated: lecturerUpdates.modifiedCount,
-            studentsUpdated: studentUpdates.modifiedCount,
-            fullNameUpdates: fullNameUpdates.modifiedCount
-        };
-
+        // Test the deployed API
+        console.log('\n🧪 Testing deployed API...');
+        const testResponse = await fetch('https://spmproject-backend.vercel.app/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: 'kwabena@knust.edu.gh',
+                password: 'password123!'
+            })
+        });
+        
+        const testData = await testResponse.json();
+        if (testData.success) {
+            const meResponse = await fetch('https://spmproject-backend.vercel.app/api/auth/me', {
+                headers: { 'Authorization': `Bearer ${testData.token}` }
+            });
+            const meData = await meResponse.json();
+            
+            console.log('📋 Deployed API now returns:');
+            console.log('   - Name:', meData.user?.name);
+            console.log('   - Honorific:', meData.user?.honorific);
+            console.log('   - Courses:', meData.user?.courses);
+            console.log('   - Full Name:', meData.user?.fullName);
+        }
+        
+        await mongoose.disconnect();
+        console.log('✅ Disconnected from database');
+        
     } catch (error) {
-        console.error('❌ Error updating user profiles:', error);
-        throw error;
+        console.error('❌ Error updating deployed profiles:', error);
     }
 }
 
-// If run directly
-if (require.main === module) {
-    const connectDB = require('../config/db');
-    
-    connectDB().then(async () => {
-        try {
-            const result = await updateUserProfiles();
-            console.log('Final result:', result);
-            process.exit(0);
-        } catch (error) {
-            console.error('Script failed:', error);
-            process.exit(1);
-        }
-    }).catch(error => {
-        console.error('Database connection failed:', error);
-        process.exit(1);
-    });
-}
-
-module.exports = updateUserProfiles;
+updateDeployedProfiles();

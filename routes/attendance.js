@@ -569,6 +569,11 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res)
         const now = new Date();
         const activeSession = sessions.find(s => new Date(s.expiresAt) > now);
         
+        // Get course mapping for full names
+        const { mapCoursesToFullDetails, getDepartmentFullName } = require('../config/courseMapping');
+        const lecturerCourses = lecturer?.courses || [];
+        const coursesWithDetails = mapCoursesToFullDetails(lecturerCourses);
+
         // Format response to match frontend expectations
         const response = {
             success: true,
@@ -577,10 +582,13 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res)
                 id: lecturer?._id || 'unknown',
                 email: lecturer?.email || 'N/A',
                 staffId: lecturer?.staffId || 'N/A',
-                courses: lecturer?.courses || [],
+                courses: lecturerCourses,
+                coursesWithDetails: coursesWithDetails,
+                courseNames: coursesWithDetails.map(c => c.fullName),
                 honorific: lecturer?.honorific || 'Mr.',
                 fullName: lecturer?.fullName || `${lecturer?.honorific || 'Mr.'} ${lecturer?.name || 'Unknown Lecturer'}`,
-                department: lecturer?.department || 'Information Technology'
+                department: getDepartmentFullName(lecturer?.department || 'Information Technology'),
+                title: lecturer?.title || 'Lecturer'
             },
             currentSession: activeSession ? {
                 courseCode: activeSession.courseCode,
