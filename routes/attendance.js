@@ -79,21 +79,27 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
     
     // Get lecturer ID - either from session or by looking up lecturer by name
     let lecturerId = session.lecturerId;
+    console.log('🔍 [CHECK-IN] Session lecturerId:', lecturerId);
+    console.log('🔍 [CHECK-IN] Session lecturer name:', session.lecturer);
+    console.log('🔍 [CHECK-IN] Full session:', JSON.stringify(session, null, 2));
     
     // FALLBACK: If session doesn't have lecturerId (old session), look it up by name
     if (!lecturerId && session.lecturer) {
+        console.log('⚠️ [CHECK-IN] No lecturerId in session, attempting name lookup...');
         try {
             const User = require('../models/User');
             const lecturer = await User.findOne({ name: session.lecturer }).select('_id');
             if (lecturer) {
                 lecturerId = lecturer._id;
-                console.log('✅ Found lecturerId by name lookup:', lecturerId);
+                console.log('✅ [CHECK-IN] Found lecturerId by name lookup:', lecturerId);
             } else {
-                console.warn('⚠️ Could not find lecturer by name:', session.lecturer);
+                console.warn('⚠️ [CHECK-IN] Could not find lecturer by name:', session.lecturer);
             }
         } catch (err) {
-            console.error('❌ Error looking up lecturer:', err);
+            console.error('❌ [CHECK-IN] Error looking up lecturer:', err);
         }
+    } else if (lecturerId) {
+        console.log('✅ [CHECK-IN] Using lecturerId from session:', lecturerId);
     }
     
     // Enhanced entry with complete student information
@@ -285,10 +291,16 @@ router.post('/generate-session', auth(['lecturer','admin']), async (req, res) =>
             expiresAt 
         };
         
+        console.log('📝 [GENERATE-SESSION] Creating session with lecturerId:', req.user.id);
+        console.log('📝 [GENERATE-SESSION] Full payload:', JSON.stringify(dbPayload, null, 2));
+        
         if (usingDb) {
-            await AttendanceSession.create(dbPayload);
+            const createdSession = await AttendanceSession.create(dbPayload);
+            console.log('✅ [GENERATE-SESSION] Session saved to DB:', createdSession._id);
+            console.log('✅ [GENERATE-SESSION] Saved lecturerId:', createdSession.lecturerId);
         } else {
             sessionsMem.push(dbPayload);
+            console.log('✅ [GENERATE-SESSION] Session saved to memory');
         }
         
         // Enhanced response for in-place QR display
