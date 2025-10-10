@@ -576,20 +576,47 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res)
         let attendanceLogs = [];
         
         if (usingDb) {
+            // DEBUG: Log what we're searching for
+            console.log('🔍 Searching for sessions:', {
+                authenticatedUserId,
+                lecturerName: lecturer.name,
+                userIdType: typeof authenticatedUserId
+            });
+            
             // Get sessions created by this lecturer (query by both lecturerId and name for robustness)
+            // Convert to ObjectId if it's a string
+            const lecturerObjectId = mongoose.Types.ObjectId.isValid(authenticatedUserId) 
+                ? new mongoose.Types.ObjectId(authenticatedUserId)
+                : authenticatedUserId;
+            
             sessions = await AttendanceSession.find({ 
                 $or: [
-                    { lecturerId: authenticatedUserId },
+                    { lecturerId: lecturerObjectId },
+                    { lecturerId: authenticatedUserId }, // Try as string too
                     { lecturer: lecturer.name }
                 ]
             }).sort({ issuedAt: -1 }).limit(10).lean();
             
+            console.log('📋 Found sessions:', sessions.length);
+            
             // Get attendance logs for these sessions
             if (sessions.length > 0) {
                 const sessionCodes = sessions.map(s => s.sessionCode);
+                console.log('🔍 Searching for attendance logs in sessions:', sessionCodes);
+                
                 attendanceLogs = await AttendanceLog.find({
                     sessionCode: { $in: sessionCodes }
                 }).sort({ timestamp: -1 }).lean();
+                
+                console.log('📝 Found attendance logs:', attendanceLogs.length);
+                if (attendanceLogs.length > 0) {
+                    console.log('📝 Sample log:', {
+                        studentId: attendanceLogs[0].studentId,
+                        sessionCode: attendanceLogs[0].sessionCode,
+                        hasLecturerId: !!attendanceLogs[0].lecturerId,
+                        lecturerId: attendanceLogs[0].lecturerId
+                    });
+                }
             }
         } else {
             // Use in-memory data (fallback)
