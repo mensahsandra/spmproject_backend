@@ -137,15 +137,28 @@ app.use("/api/quizzes", require("./routes/quizzes"));
 app.use("/api/cwa", require("./routes/cwa"));
 app.use("/api/deadlines", require("./routes/deadlines"));
 
-// Student results aggregation routes
 app.use("/api/results", require("./routes/results"));
 
 // Preflight support (explicit for some environments)
 app.options('*', cors());
 
-// Basic health check route
+// Basic health check endpoint
 app.get("/", (req, res) => {
-    res.json({ message: "Student Performance Matrix API is running!" });
+  res.json({ 
+    ok: true, 
+    message: "Student Performance Metrics API is running",
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Ping endpoint to keep serverless function warm
+app.get("/api/ping", (req, res) => {
+  res.json({ 
+    ok: true, 
+    message: "pong",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
 });
 
 // Health for clients
