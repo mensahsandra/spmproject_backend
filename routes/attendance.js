@@ -1326,7 +1326,78 @@ router.post('/clear-sample-data', auth(['admin']), async (req, res) => {
     }
 });
 
-// Fake student simulation endpoint removed - now using real student data only
-// Students must scan QR codes to check in and appear in attendance records
+// Debug endpoint to verify lecturerId fix is deployed
+router.get('/debug/lecturerId-fix', async (req, res) => {
+    try {
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        if (!usingDb) {
+            return res.json({
+                deployed: true,
+                message: 'LecturerId fix is deployed in code',
+                database: 'not connected',
+                note: 'Database not available to check records'
+            });
+        }
+
+        // Check recent sessions
+        const recentSession = await AttendanceSession.findOne()
+            .sort({ issuedAt: -1 })
+            .lean();
+        
+        // Check recent attendance logs
+        const recentLog = await AttendanceLog.findOne()
+            .sort({ timestamp: -1 })
+            .lean();
+        
+        // Count logs with lecturerId
+        const logsWithLecturerId = await AttendanceLog.countDocuments({ 
+            lecturerId: { $exists: true, $ne: null } 
+        });
+        const totalLogs = await AttendanceLog.countDocuments();
+        
+        res.json({
+            deployed: true,
+            message: 'LecturerId fix is deployed',
+            codeVersion: 'v2.0 - with lecturerId support',
+            database: {
+                connected: true,
+                recentSession: recentSession ? {
+                    sessionCode: recentSession.sessionCode,
+                    lecturer: recentSession.lecturer,
+                    hasLecturerId: !!recentSession.lecturerId,
+                    lecturerId: recentSession.lecturerId || 'MISSING',
+                    createdAt: recentSession.issuedAt
+                } : null,
+                recentLog: recentLog ? {
+                    studentId: recentLog.studentId,
+                    sessionCode: recentLog.sessionCode,
+                    lecturer: recentLog.lecturer,
+                    hasLecturerId: !!recentLog.lecturerId,
+                    lecturerId: recentLog.lecturerId || 'MISSING',
+                    timestamp: recentLog.timestamp
+                } : null,
+                statistics: {
+                    totalLogs,
+                    logsWithLecturerId,
+                    logsWithoutLecturerId: totalLogs - logsWithLecturerId,
+                    percentageFixed: totalLogs > 0 ? Math.round((logsWithLecturerId / totalLogs) * 100) : 0
+                }
+            },
+            instructions: {
+                ifNoRecordsHaveLecturerId: 'Generate a NEW session after this deployment and have a student check in',
+                oldSessions: 'Old sessions created before the fix will not have lecturerId',
+                solution: 'Always use newly generated sessions to ensure lecturerId is saved'
+            }
+        });
+        
+    } catch (error) {
+        res.status(500).json({
+            deployed: true,
+            message: 'LecturerId fix is deployed but error checking database',
+            error: error.message
+        });
+    }
+});
 
 module.exports = router;
