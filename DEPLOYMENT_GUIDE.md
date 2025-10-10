@@ -2,7 +2,7 @@
 
 ## 🔍 Current Issue
 
-Your frontend is calling the deployed Vercel backend (`https://spmproject-backend.vercel.app`) but the quiz routes haven't been deployed yet. The local backend has the quiz functionality, but Vercel doesn't.
+Your frontend is calling the deployed Vercel backend (`https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app`) but the quiz routes haven't been deployed yet. The local backend has the quiz functionality, but Vercel doesn't.
 
 ## 📋 Deployment Steps
 
@@ -29,9 +29,9 @@ git push origin main
 
 ### Step 3: Verify Deployment
 After deployment, test these URLs:
-- `https://spmproject-backend.vercel.app/api/health`
-- `https://spmproject-backend.vercel.app/api/quizzes/test`
-- `https://spmproject-backend.vercel.app/api/auth/me` (with auth token)
+- `https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api/health`
+- `https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api/quizzes/test`
+- `https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api/auth/me` (with auth token)
 
 ## 🔧 Quick Fix for Testing
 
@@ -46,7 +46,7 @@ const API_BASE = 'http://localhost:3000/api';
 Wait for deployment to complete, then test:
 ```javascript
 // Your current setup (should work after deployment)
-const API_BASE = 'https://spmproject-backend.vercel.app/api';
+const API_BASE = 'https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api';
 ```
 
 ## 🧪 Test Deployment
@@ -55,23 +55,23 @@ After deploying, test these endpoints:
 
 ### 1. Health Check
 ```bash
-curl https://spmproject-backend.vercel.app/api/health
+curl https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api/health
 ```
 
 ### 2. Quiz Routes
 ```bash
-curl https://spmproject-backend.vercel.app/api/quizzes/test
+curl https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api/quizzes/test
 ```
 
 ### 3. Auth Me (with token)
 ```bash
 curl -H "Authorization: Bearer YOUR_TOKEN" \
-     https://spmproject-backend.vercel.app/api/auth/me
+     https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api/auth/me
 ```
 
 ### 4. Quiz Creation (with token)
 ```bash
-curl -X POST https://spmproject-backend.vercel.app/api/quizzes/create-minimal \
+curl -X POST https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api/quizzes/create-minimal \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"title":"Test Quiz","courseCode":"BIT364"}'
@@ -101,14 +101,14 @@ Make sure these files are included in your deployment:
 3. **Test step by step:**
    ```bash
    # Test basic health
-   curl https://spmproject-backend.vercel.app/api/health
+   curl https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api/health
    
    # Test quiz health
-   curl https://spmproject-backend.vercel.app/api/quizzes/health
+   curl https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api/quizzes/health
    
    # Test with auth
    curl -H "Authorization: Bearer TOKEN" \
-        https://spmproject-backend.vercel.app/api/auth/me
+        https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app/api/auth/me
    ```
 
 ## 🎯 Expected Results

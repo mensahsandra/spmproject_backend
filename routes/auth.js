@@ -451,10 +451,12 @@ router.get('/me-enhanced', auth(['student', 'lecturer', 'admin']), async (req, r
 });
 
 // @route   GET /api/auth/me
-// @desc    Get current authenticated user with enhanced profile data
+// @desc    Get current authenticated user with enhanced profile data and full course names
 // @access  Private
 router.get('/me', auth(['student', 'lecturer', 'admin']), async (req, res) => {
     try {
+        const { mapCoursesToFullDetails, getDepartmentFullName } = require('../config/courseMapping');
+
         const user = await User.findById(req.user.id).select('-password').lean();
         if (!user) {
             return res.status(404).json({
@@ -476,22 +478,29 @@ router.get('/me', auth(['student', 'lecturer', 'admin']), async (req, res) => {
 
         // Add student-specific fields
         if (user.role === 'student') {
+            const studentCourses = user.courses || (user.course ? [user.course] : []);
             Object.assign(responseUser, {
                 studentId: user.studentId,
                 course: user.course,
-                courses: user.courses || (user.course ? [user.course] : []),
+                courses: studentCourses,
+                coursesWithDetails: mapCoursesToFullDetails(studentCourses),
                 semester: user.semester
             });
         }
 
-        // Add lecturer-specific fields with enhanced data
+        // Add lecturer-specific fields with enhanced data and full course names
         if (user.role === 'lecturer') {
+            const lecturerCourses = user.courses || ['BIT364'];
+            const coursesWithDetails = mapCoursesToFullDetails(lecturerCourses);
+
             Object.assign(responseUser, {
                 staffId: user.staffId,
                 honorific: user.honorific || 'Mr.',
                 title: user.title || 'Lecturer',
-                department: user.department || 'Information Technology',
-                courses: user.courses || ['BIT364'],
+                department: getDepartmentFullName(user.department || 'Information Technology'),
+                courses: lecturerCourses,
+                coursesWithDetails: coursesWithDetails,
+                courseNames: coursesWithDetails.map(c => c.fullName),
                 fullName: user.fullName || `${user.honorific || 'Mr.'} ${user.name}`,
                 officeLocation: user.officeLocation,
                 phoneNumber: user.phoneNumber
@@ -548,10 +557,12 @@ router.get('/profile', auth(['student', 'lecturer', 'admin']), async (req, res) 
 });
 
 // @route   GET /api/auth/lecturer/profile
-// @desc    Get lecturer profile (alias for profile with lecturer-specific data)
+// @desc    Get lecturer profile with full course details
 // @access  Private (Lecturer only)
 router.get('/lecturer/profile', auth(['lecturer', 'admin']), async (req, res) => {
     try {
+        const { mapCoursesToFullDetails, getDepartmentFullName } = require('../config/courseMapping');
+
         const user = await User.findById(req.user.id).select('-password').lean();
         if (!user) {
             return res.status(404).json({
@@ -567,6 +578,9 @@ router.get('/lecturer/profile', auth(['lecturer', 'admin']), async (req, res) =>
             });
         }
 
+        const lecturerCourses = user.courses || [];
+        const coursesWithDetails = mapCoursesToFullDetails(lecturerCourses);
+
         res.json({
             success: true,
             lecturer: {
@@ -578,10 +592,12 @@ router.get('/lecturer/profile', auth(['lecturer', 'admin']), async (req, res) =>
                 role: user.role,
                 staffId: user.staffId || 'N/A',
                 centre: user.centre || 'Not specified',
-                department: user.department || 'Information Technology',
+                department: getDepartmentFullName(user.department || 'Information Technology'),
                 title: user.title || 'Lecturer',
-                courses: user.courses || [],
-                courseAssignments: user.teachingAssignments || [],
+                courses: lecturerCourses,
+                coursesWithDetails: coursesWithDetails,
+                courseNames: coursesWithDetails.map(c => c.fullName),
+                courseAssignments: user.teachingAssignments || coursesWithDetails,
                 officeLocation: user.officeLocation,
                 phoneNumber: user.phoneNumber,
                 avatar: user.avatar
@@ -823,7 +839,7 @@ router.post('/update-profiles', auth(['admin']), async (req, res) => {
     try {
         const updateUserProfiles = require('../scripts/updateUserProfiles');
         const result = await updateUserProfiles();
-        
+
         res.json({
             success: true,
             message: 'User profiles updated successfully',
@@ -1034,21 +1050,41 @@ router.get('/lecturer/courses', auth(['lecturer', 'admin']), async (req, res) =>
             ];
         }
 
+        // Import course mapping for enhanced details
+        const { mapCoursesToFullDetails, getDepartmentFullName } = require('../config/courseMapping');
+        const userCourses = user.courses || ['BIT364'];
+        const coursesWithFullDetails = mapCoursesToFullDetails(userCourses);
+
         res.json({
             success: true,
             lecturer: {
                 id: user._id,
                 name: user.name,
-                fullName: user.fullName || `${user.honorific || 'Mr.'} ${user.name}`
+                fullName: user.fullName || `${user.honorific || 'Mr.'} ${user.name}`,
+                honorific: user.honorific || 'Prof.',
+                department: getDepartmentFullName(user.department || 'Information Technology'),
+                title: user.title || 'Lecturer'
             },
-            courses: courseDetails.map(course => ({
+            courses: coursesWithFullDetails.map(course => ({
                 code: course.code,
                 name: course.name,
-                department: course.department,
-                credits: course.credits,
-                description: course.description
+                fullName: course.fullName,
+                department: course.details.department,
+                credits: course.details.credits,
+                level: course.details.level,
+                description: `${course.fullName} - Level ${course.details.level} course`,
+                // Additional fields for assessment page
+                canCreateQuiz: true,
+                canViewGrades: true,
+                enrolledStudents: 0
             })),
-            totalCourses: courseDetails.length
+            courseNames: coursesWithFullDetails.map(c => c.fullName),
+            totalCourses: coursesWithFullDetails.length,
+            summary: {
+                totalCourses: coursesWithFullDetails.length,
+                departments: [...new Set(coursesWithFullDetails.map(c => c.details.department))],
+                levels: [...new Set(coursesWithFullDetails.map(c => c.details.level))]
+            }
         });
     } catch (error) {
         console.error("Lecturer courses fetch error:", error.message);

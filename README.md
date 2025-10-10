@@ -2,6 +2,10 @@
 
 Express + Mongoose API for attendance, grades, CWA, deadlines.
 
+## Repository & Deployment
+- **GitHub Repository:** https://github.com/mensahsandra/spmproject_backend.git
+- **Vercel Deployment:** https://spmproject-backend-34xnz1owc-mensahsandras-projects.vercel.app
+
 ## Endpoints
 - GET /api/health — service + DB status
 - GET /api/version — build/version metadata (name, version, commit, time)

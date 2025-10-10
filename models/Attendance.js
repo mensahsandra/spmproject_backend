@@ -6,6 +6,7 @@ const AttendanceSessionSchema = new mongoose.Schema({
   courseCode: String,
   courseName: String,
   lecturer: String,
+  lecturerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
   issuedAt: { type: Date, required: true },
   expiresAt: { type: Date, required: true },
 }, { timestamps: true });
@@ -17,8 +18,11 @@ const AttendanceLogSchema = new mongoose.Schema({
   courseCode: String,
   courseName: String,
   lecturer: String,
+  lecturerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
+  studentName: String,
   centre: String,
   location: String,
+  checkInMethod: String,
   timestamp: { type: Date, default: Date.now },
 }, { timestamps: true });
 

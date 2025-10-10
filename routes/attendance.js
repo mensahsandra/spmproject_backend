@@ -86,6 +86,7 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
         courseCode: parsed?.courseCode || session.courseCode,
         courseName: parsed?.course || parsed?.courseName || session.courseName,
         lecturer: parsed?.lecturer || parsed?.lecturerName || session.lecturer,
+        lecturerId: session.lecturerId,  // CRITICAL: Get lecturer ID from session
         centre: centre || req.user.centre || studentInfo?.centre || 'Not specified',
         location: location || null,
         timestamp: nowIso,
@@ -160,7 +161,10 @@ router.get('/active-session', auth(['lecturer','admin']), async (req, res) => {
         let activeSession = null;
         if (usingDb) {
             activeSession = await AttendanceSession.findOne({
-                lecturer: req.user.name,
+                $or: [
+                    { lecturerId: lecturerId },
+                    { lecturer: req.user.name }
+                ],
                 expiresAt: { $gt: now }
             }).lean();
         } else {
@@ -203,7 +207,10 @@ router.post('/generate-session', auth(['lecturer','admin']), async (req, res) =>
         let existingSession = null;
         if (usingDb) {
             existingSession = await AttendanceSession.findOne({
-                lecturer: lecturerName,
+                $or: [
+                    { lecturerId: req.user.id },
+                    { lecturer: lecturerName }
+                ],
                 expiresAt: { $gt: now }
             }).lean();
         } else {
@@ -246,8 +253,16 @@ router.post('/generate-session', auth(['lecturer','admin']), async (req, res) =>
             margin: 2
         });
         
-        // Database payload
-        const dbPayload = { sessionCode, courseCode, courseName, lecturer: lecturerName, issuedAt, expiresAt };
+        // Database payload with lecturer ID
+        const dbPayload = { 
+            sessionCode, 
+            courseCode, 
+            courseName, 
+            lecturer: lecturerName, 
+            lecturerId: req.user.id,  // Store lecturer's MongoDB ObjectId
+            issuedAt, 
+            expiresAt 
+        };
         
         if (usingDb) {
             await AttendanceSession.create(dbPayload);
@@ -348,6 +363,7 @@ router.post('/mark', auth(['student','lecturer','admin']), async (req, res) => {
         courseCode: session.courseCode,
         courseName: session.courseName,
         lecturer: session.lecturer,
+        lecturerId: session.lecturerId,  // CRITICAL: Get lecturer ID from session
         centre: req.user.centre || studentInfo?.centre || 'Not specified',
         timestamp: nowIso,
         checkInMethod: 'MANUAL_CODE'
@@ -560,9 +576,12 @@ router.get('/lecturer/:lecturerId', auth(['lecturer','admin']), async (req, res)
         let attendanceLogs = [];
         
         if (usingDb) {
-            // Get sessions created by this lecturer
+            // Get sessions created by this lecturer (query by both lecturerId and name for robustness)
             sessions = await AttendanceSession.find({ 
-                lecturer: lecturer.name 
+                $or: [
+                    { lecturerId: authenticatedUserId },
+                    { lecturer: lecturer.name }
+                ]
             }).sort({ issuedAt: -1 }).limit(10).lean();
             
             // Get attendance logs for these sessions
@@ -698,7 +717,10 @@ router.get('/notifications/:lecturerId', auth(['lecturer','admin']), async (req,
             
             if (lecturer) {
                 const sessions = await AttendanceSession.find({ 
-                    lecturer: lecturer.name 
+                    $or: [
+                        { lecturerId: lecturerId },
+                        { lecturer: lecturer.name }
+                    ]
                 }).lean();
                 
                 const sessionCodes = sessions.map(s => s.sessionCode);
@@ -779,9 +801,12 @@ router.get('/lecturer-dashboard', auth(['lecturer','admin']), async (req, res) =
         let attendanceLogs = [];
         
         if (usingDb) {
-            // Get recent sessions by this lecturer
+            // Get recent sessions by this lecturer (query by both lecturerId and name)
             sessions = await AttendanceSession.find({ 
-                lecturer: lecturerName 
+                $or: [
+                    { lecturerId: req.user.id },
+                    { lecturer: req.user.name }
+                ]
             }).sort({ issuedAt: -1 }).limit(10).lean();
             
             // Get attendance logs for these sessions
