@@ -77,6 +77,25 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
         console.log('Could not fetch student info:', error.message);
     }
     
+    // Get lecturer ID - either from session or by looking up lecturer by name
+    let lecturerId = session.lecturerId;
+    
+    // FALLBACK: If session doesn't have lecturerId (old session), look it up by name
+    if (!lecturerId && session.lecturer) {
+        try {
+            const User = require('../models/User');
+            const lecturer = await User.findOne({ name: session.lecturer }).select('_id');
+            if (lecturer) {
+                lecturerId = lecturer._id;
+                console.log('✅ Found lecturerId by name lookup:', lecturerId);
+            } else {
+                console.warn('⚠️ Could not find lecturer by name:', session.lecturer);
+            }
+        } catch (err) {
+            console.error('❌ Error looking up lecturer:', err);
+        }
+    }
+    
     // Enhanced entry with complete student information
     const baseEntry = {
         studentId: studentId || req.user.studentId || studentInfo?.studentId,
@@ -86,12 +105,14 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
         courseCode: parsed?.courseCode || session.courseCode,
         courseName: parsed?.course || parsed?.courseName || session.courseName,
         lecturer: parsed?.lecturer || parsed?.lecturerName || session.lecturer,
-        lecturerId: session.lecturerId,  // CRITICAL: Get lecturer ID from session
+        lecturerId: lecturerId,  // CRITICAL: Get lecturer ID from session or lookup
         centre: centre || req.user.centre || studentInfo?.centre || 'Not specified',
         location: location || null,
         timestamp: nowIso,
         checkInMethod: qrCode ? 'QR_SCAN' : 'MANUAL_CODE'
     };
+    
+    console.log('📝 Creating attendance with lecturerId:', lecturerId ? '✅ Present' : '❌ Missing');
     
     try {
         if (usingDb) {
@@ -355,6 +376,22 @@ router.post('/mark', auth(['student','lecturer','admin']), async (req, res) => {
         console.log('Could not fetch student info:', error.message);
     }
     
+    // Get lecturer ID - either from session or by looking up lecturer by name
+    let lecturerId = session.lecturerId;
+    
+    // FALLBACK: If session doesn't have lecturerId (old session), look it up by name
+    if (!lecturerId && session.lecturer) {
+        try {
+            const lecturer = await User.findOne({ name: session.lecturer }).select('_id');
+            if (lecturer) {
+                lecturerId = lecturer._id;
+                console.log('✅ Found lecturerId by name lookup (mark endpoint):', lecturerId);
+            }
+        } catch (err) {
+            console.error('❌ Error looking up lecturer:', err);
+        }
+    }
+    
     // Create attendance entry with complete student information
     const attendanceEntry = {
         studentId: actualStudentId,
@@ -363,11 +400,13 @@ router.post('/mark', auth(['student','lecturer','admin']), async (req, res) => {
         courseCode: session.courseCode,
         courseName: session.courseName,
         lecturer: session.lecturer,
-        lecturerId: session.lecturerId,  // CRITICAL: Get lecturer ID from session
+        lecturerId: lecturerId,  // CRITICAL: Get lecturer ID from session or lookup
         centre: req.user.centre || studentInfo?.centre || 'Not specified',
         timestamp: nowIso,
         checkInMethod: 'MANUAL_CODE'
     };
+    
+    console.log('📝 Creating attendance (mark) with lecturerId:', lecturerId ? '✅ Present' : '❌ Missing');
     
     try {
         if (usingDb) {
