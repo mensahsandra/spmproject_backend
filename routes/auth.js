@@ -56,15 +56,33 @@ router.post(
                 });
             }
 
+            // Enhanced user payload with all required fields
+            const userPayload = {
+                id: user._id,
+                userId: user._id, // Explicit userId
+                lecturerId: user._id, // MongoDB ObjectId for backend queries
+                email: user.email,
+                role: user.role,
+                name: user.name,
+                firstName: user.name?.split(' ')[0] || user.name,
+                lastName: user.name?.split(' ').slice(1).join(' ') || '',
+                ...(user.studentId && { studentId: user.studentId }),
+                ...(user.staffId && { staffId: user.staffId }), // Actual staff ID
+                ...(user.role === 'lecturer' && {
+                    honorific: user.honorific || 'Mr.',
+                    title: user.title || 'Lecturer',
+                    department: user.department || 'Information Technology',
+                    fullName: user.fullName || `${user.honorific || 'Mr.'} ${user.name}`,
+                    courses: user.courses || ['BIT364'],
+                    centre: user.centre || 'Not specified'
+                })
+            };
+
+            console.log('🔍 [LOGIN] User payload being returned:', JSON.stringify(userPayload, null, 2));
+            console.log('🔍 [LOGIN] Staff ID specifically:', userPayload.staffId);
+
             const payload = {
-                user: {
-                    id: user._id,
-                    email: user.email,
-                    role: user.role,
-                    name: user.name,
-                    ...(user.studentId && { studentId: user.studentId }),
-                    ...(user.staffId && { staffId: user.staffId })
-                },
+                user: userPayload,
             };
 
             // Sign JWT
