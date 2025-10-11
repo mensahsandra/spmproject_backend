@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const router = express.Router();
+const NotificationService = require('../services/notificationService');
 
 // Simple test route first (no dependencies)
 router.get('/test', (req, res) => {
@@ -385,10 +386,31 @@ router.post('/create', auth(['lecturer', 'admin']), upload.array('attachments', 
 
     await quiz.save();
 
-    // Send notifications to students
+    // Send notifications to students and lecturer
     if (notifyStudents) {
       try {
-        await notifyStudentsAboutQuiz(quiz, restrictToAttendees);
+        // Notify students about new quiz
+        await NotificationService.notifyQuizCreated(quiz, req.user.id);
+        
+        // Also notify lecturer that quiz was created successfully
+        await NotificationService.createNotification({
+          recipientId: req.user.id,
+          recipientRole: 'lecturer',
+          type: 'quiz_created',
+          title: 'Quiz Created Successfully',
+          message: `Your quiz "${quiz.title}" for ${quiz.courseCode} has been created and shared with students.`,
+          relatedQuizId: quiz._id,
+          relatedCourseCode: quiz.courseCode,
+          actionUrl: '/lecturer/assessment',
+          actionLabel: 'View Assessments',
+          priority: 'normal',
+          metadata: {
+            quizId: quiz._id,
+            courseCode: quiz.courseCode,
+            studentCount: 'all'
+          }
+        });
+        
         quiz.notificationSent = true;
         await quiz.save();
       } catch (notifyError) {
@@ -808,6 +830,309 @@ router.delete('/:quizId', auth(['lecturer', 'admin']), async (req, res) => {
   }
 });
 
+// Submit quiz (Student)
+router.post('/:quizId/submit', auth(['student']), upload.array('submissionFiles', 5), async (req, res) => {
+  try {
+    const { quizId } = req.params;
+    const { submissionText } = req.body;
+
+    // Check if quiz exists and is active
+    const quiz = await Quiz.findById(quizId);
+    if (!quiz) {
+      return res.status(404).json({
+        ok: false,
+        message: 'Quiz not found'
+      });
+    }
+
+    // Check if quiz is still open
+    const now = new Date();
+    if (now < quiz.startTime) {
+      return res.status(400).json({
+        ok: false,
+        message: 'Quiz has not started yet'
+      });
+    }
+    if (now > quiz.endTime) {
+      return res.status(400).json({
+        ok: false,
+        message: 'Quiz submission deadline has passed'
+      });
+    }
+
+    // Check if student already submitted
+    const existingSubmission = await QuizSubmission.findOne({
+      quiz: quizId,
+      student: req.user.id
+    });
+
+    if (existingSubmission) {
+      return res.status(400).json({
+        ok: false,
+        message: 'You have already submitted this quiz'
+      });
+    }
+
+    // Process uploaded files
+    const submissionFiles = req.files ? req.files.map(file => ({
+      filename: file.filename,
+      originalName: file.originalname,
+      path: file.path,
+      size: file.size,
+      mimetype: file.mimetype
+    })) : [];
+
+    // Create submission
+    const submission = new QuizSubmission({
+      quiz: quizId,
+      student: req.user.id,
+      studentId: req.user.studentId || req.user.id,
+      studentName: req.user.name,
+      submissionFiles,
+      submissionText,
+      submittedAt: new Date()
+    });
+
+    await submission.save();
+
+    // Send notifications
+    try {
+      await NotificationService.notifyQuizSubmitted(
+        submission,
+        quiz,
+        req.user.id,
+        quiz.lecturer
+      );
+    } catch (notifyError) {
+      console.warn('Failed to send submission notifications:', notifyError.message);
+    }
+
+    res.status(201).json({
+      ok: true,
+      message: 'Quiz submitted successfully',
+      submission: {
+        id: submission._id,
+        quizId: quiz._id,
+        quizTitle: quiz.title,
+        submittedAt: submission.submittedAt,
+        filesCount: submissionFiles.length
+      }
+    });
+
+  } catch (error) {
+    console.error('Quiz submission error:', error);
+    
+    // Clean up uploaded files if submission fails
+    if (req.files) {
+      req.files.forEach(file => {
+        fs.unlink(file.path, (err) => {
+          if (err) console.error('File cleanup error:', err.message);
+        });
+      });
+    }
+
+    res.status(500).json({
+      ok: false,
+      message: 'Failed to submit quiz',
+      error: error.message
+    });
+  }
+});
+
+// Grade quiz submission (Lecturer)
+router.post('/:quizId/submissions/:submissionId/grade', auth(['lecturer', 'admin']), async (req, res) => {
+  try {
+    const { quizId, submissionId } = req.params;
+    const { score, feedback } = req.body;
+
+    // Verify quiz belongs to lecturer
+    const quiz = await Quiz.findOne({
+      _id: quizId,
+      lecturer: req.user.id
+    });
+
+    if (!quiz) {
+      return res.status(404).json({
+        ok: false,
+        message: 'Quiz not found or access denied'
+      });
+    }
+
+    // Find submission
+    const submission = await QuizSubmission.findOne({
+      _id: submissionId,
+      quiz: quizId
+    }).populate('student', 'name studentId email');
+
+    if (!submission) {
+      return res.status(404).json({
+        ok: false,
+        message: 'Submission not found'
+      });
+    }
+
+    // Validate score
+    if (score < 0 || score > quiz.maxScore) {
+      return res.status(400).json({
+        ok: false,
+        message: `Score must be between 0 and ${quiz.maxScore}`
+      });
+    }
+
+    // Calculate grade
+    const percentage = (score / quiz.maxScore) * 100;
+    const letterGrade = percentage >= 90 ? 'A' :
+                       percentage >= 80 ? 'B' :
+                       percentage >= 70 ? 'C' :
+                       percentage >= 60 ? 'D' : 'F';
+
+    // Update submission
+    submission.score = score;
+    submission.grade = letterGrade;
+    submission.feedback = feedback;
+    submission.gradedAt = new Date();
+    submission.gradedBy = req.user.id;
+
+    await submission.save();
+
+    // Send notifications
+    try {
+      // Prepare submission object with grading info for notification
+      const submissionForNotification = {
+        _id: submission._id,
+        score: score,
+        totalScore: quiz.maxScore,
+        percentage: Math.round(percentage),
+        feedback: feedback,
+        gradedAt: submission.gradedAt
+      };
+
+      await NotificationService.notifyQuizGraded(
+        submissionForNotification,
+        quiz,
+        submission.student._id,
+        req.user.id
+      );
+    } catch (notifyError) {
+      console.warn('Failed to send grading notifications:', notifyError.message);
+    }
+
+    res.json({
+      ok: true,
+      message: 'Quiz graded successfully',
+      submission: {
+        id: submission._id,
+        studentName: submission.studentName,
+        score,
+        maxScore: quiz.maxScore,
+        percentage: Math.round(percentage),
+        grade: letterGrade,
+        feedback,
+        gradedAt: submission.gradedAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Quiz grading error:', error);
+    res.status(500).json({
+      ok: false,
+      message: 'Failed to grade quiz',
+      error: error.message
+    });
+  }
+});
+
+// Get available quizzes for student
+router.get('/student/available', auth(['student']), async (req, res) => {
+  try {
+    const { courseCode } = req.query;
+    
+    // Build query
+    const query = {
+      isActive: true,
+      startTime: { $lte: new Date() },
+      endTime: { $gte: new Date() }
+    };
+
+    if (courseCode) {
+      query.courseCode = courseCode;
+    }
+
+    // Get available quizzes
+    const quizzes = await Quiz.find(query)
+      .sort({ startTime: -1 })
+      .select('title description courseCode startTime endTime maxScore instructions');
+
+    // Check which quizzes student has already submitted
+    const quizIds = quizzes.map(q => q._id);
+    const submissions = await QuizSubmission.find({
+      quiz: { $in: quizIds },
+      student: req.user.id
+    }).select('quiz');
+
+    const submittedQuizIds = new Set(submissions.map(s => s.quiz.toString()));
+
+    // Add submission status to each quiz
+    const quizzesWithStatus = quizzes.map(quiz => ({
+      ...quiz.toObject(),
+      hasSubmitted: submittedQuizIds.has(quiz._id.toString()),
+      timeRemaining: Math.max(0, quiz.endTime - new Date())
+    }));
+
+    res.json({
+      ok: true,
+      quizzes: quizzesWithStatus,
+      total: quizzesWithStatus.length
+    });
+
+  } catch (error) {
+    console.error('Student quizzes fetch error:', error);
+    res.status(500).json({
+      ok: false,
+      message: 'Failed to fetch available quizzes',
+      error: error.message
+    });
+  }
+});
+
+// Get student's quiz submissions
+router.get('/student/submissions', auth(['student']), async (req, res) => {
+  try {
+    const submissions = await QuizSubmission.find({
+      student: req.user.id
+    })
+      .populate('quiz', 'title courseCode maxScore startTime endTime')
+      .sort({ submittedAt: -1 });
+
+    const formattedSubmissions = submissions.map(sub => ({
+      id: sub._id,
+      quizTitle: sub.quiz.title,
+      courseCode: sub.quiz.courseCode,
+      submittedAt: sub.submittedAt,
+      score: sub.score,
+      maxScore: sub.quiz.maxScore,
+      grade: sub.grade,
+      feedback: sub.feedback,
+      gradedAt: sub.gradedAt,
+      status: sub.gradedAt ? 'graded' : 'pending'
+    }));
+
+    res.json({
+      ok: true,
+      submissions: formattedSubmissions,
+      total: formattedSubmissions.length
+    });
+
+  } catch (error) {
+    console.error('Student submissions fetch error:', error);
+    res.status(500).json({
+      ok: false,
+      message: 'Failed to fetch submissions',
+      error: error.message
+    });
+  }
+});
+
 // Get students for course (for notification targeting)
 router.get('/course/:courseCode/students', auth(['lecturer', 'admin']), async (req, res) => {
   try {
@@ -897,6 +1222,10 @@ router.get('/health', (req, res) => {
       'GET /api/quizzes/course/:courseCode',
       'GET /api/quizzes/course/:courseCode/students',
       'GET /api/quizzes/:quizId/submissions',
+      'POST /api/quizzes/:quizId/submit',
+      'POST /api/quizzes/:quizId/submissions/:submissionId/grade',
+      'GET /api/quizzes/student/available',
+      'GET /api/quizzes/student/submissions',
       'GET /api/quizzes/lecturer/dashboard',
       'GET /api/quizzes/lecturer/courses'
     ]

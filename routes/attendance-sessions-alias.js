@@ -29,4 +29,11 @@ router.get('/', auth(['lecturer', 'admin']), (req, res, next) => {
     attendanceRouter(req, res, next);
 });
 
+// DELETE /api/attendance-sessions/reset -> DELETE /api/attendance/reset
+router.delete('/reset', auth(['lecturer', 'admin']), (req, res, next) => {
+    console.log('🔀 Redirecting DELETE /api/attendance-sessions/reset -> /api/attendance/reset');
+    req.url = '/reset';
+    attendanceRouter(req, res, next);
+});
+
 module.exports = router;

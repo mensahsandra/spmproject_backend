@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const { AttendanceSession, AttendanceLog } = require('../models/Attendance');
 const AttendanceRecordService = require('../services/attendanceRecordService');
 const auth = require('../middleware/auth');
+const NotificationService = require('../services/notificationService');
 
 // In-memory stores fallback if DB not connected
 const sessionsMem = [];
@@ -135,6 +136,17 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
             }
             
             const created = await AttendanceLog.create(baseEntry);
+            
+            // Send notification to lecturer about the check-in
+            if (lecturerId) {
+                try {
+                    await NotificationService.notifyAttendanceScan(created, lecturerId);
+                } catch (notifyError) {
+                    console.error('Failed to send attendance notification:', notifyError.message);
+                    // Don't fail the check-in if notification fails
+                }
+            }
+            
             return res.json({ 
                 ok: true, 
                 message: 'Attendance marked successfully', 
@@ -1473,6 +1485,104 @@ router.get('/debug/lecturerId-fix', async (req, res) => {
         res.status(500).json({
             deployed: true,
             message: 'LecturerId fix is deployed but error checking database',
+            error: error.message
+        });
+    }
+});
+
+// Reset attendance data (lecturer only)
+router.delete('/reset', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const lecturerId = req.user.id;
+        const { sessionCode, courseCode, confirmReset } = req.body;
+        
+        // Safety check - require explicit confirmation
+        if (confirmReset !== true) {
+            return res.status(400).json({
+                ok: false,
+                message: 'Please confirm reset by setting confirmReset to true',
+                warning: 'This action will delete attendance records'
+            });
+        }
+        
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        if (!usingDb) {
+            // Reset memory stores
+            const sessionsBefore = sessionsMem.length;
+            const logsBefore = attendanceLogsMem.length;
+            
+            sessionsMem.length = 0;
+            attendanceLogsMem.length = 0;
+            
+            return res.json({
+                ok: true,
+                message: 'Attendance data reset successfully (memory)',
+                deleted: {
+                    sessions: sessionsBefore,
+                    logs: logsBefore
+                }
+            });
+        }
+        
+        // Build query based on provided filters
+        let sessionQuery = {};
+        let logQuery = {};
+        
+        if (sessionCode) {
+            // Reset specific session
+            sessionQuery.sessionCode = sessionCode;
+            logQuery.sessionCode = sessionCode;
+        } else if (courseCode) {
+            // Reset all sessions for a course
+            sessionQuery.courseCode = courseCode;
+            logQuery.courseCode = courseCode;
+        }
+        
+        // Only allow lecturer to reset their own sessions
+        sessionQuery.$or = [
+            { lecturerId: lecturerId },
+            { lecturer: req.user.name }
+        ];
+        
+        // Find matching sessions to get their codes
+        const sessions = await AttendanceSession.find(sessionQuery).select('sessionCode');
+        const sessionCodes = sessions.map(s => s.sessionCode);
+        
+        // Update log query to match lecturer's sessions
+        if (sessionCodes.length > 0) {
+            logQuery.sessionCode = { $in: sessionCodes };
+        } else {
+            // No sessions found, try to match by lecturerId in logs
+            logQuery.lecturerId = lecturerId;
+        }
+        
+        // Delete sessions and logs
+        const [deletedSessions, deletedLogs] = await Promise.all([
+            AttendanceSession.deleteMany(sessionQuery),
+            AttendanceLog.deleteMany(logQuery)
+        ]);
+        
+        console.log(`🗑️ Reset attendance: ${deletedSessions.deletedCount} sessions, ${deletedLogs.deletedCount} logs for lecturer ${lecturerId}`);
+        
+        res.json({
+            ok: true,
+            message: 'Attendance data reset successfully',
+            deleted: {
+                sessions: deletedSessions.deletedCount,
+                logs: deletedLogs.deletedCount
+            },
+            filters: {
+                sessionCode: sessionCode || 'all',
+                courseCode: courseCode || 'all'
+            }
+        });
+        
+    } catch (error) {
+        console.error('Reset attendance error:', error);
+        res.status(500).json({
+            ok: false,
+            message: 'Failed to reset attendance data',
             error: error.message
         });
     }

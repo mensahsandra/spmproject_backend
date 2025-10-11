@@ -139,6 +139,9 @@ app.use("/api/deadlines", require("./routes/deadlines"));
 
 app.use("/api/results", require("./routes/results"));
 
+// Notification routes
+app.use("/api/notifications", require("./routes/notifications"));
+
 // Preflight support (explicit for some environments)
 app.options('*', cors());
 
