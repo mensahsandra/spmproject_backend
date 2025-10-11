@@ -870,10 +870,12 @@ router.put('/profile', auth(['student', 'lecturer', 'admin']), async (req, res) 
             title,
             department,
             officeLocation,
-            phoneNumber
+            phoneNumber,
+            staffId,
+            studentId
         } = req.body;
 
-        const user = await User.findById(userId);
+        const user = await User.findById(userId).select('-password');
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -896,11 +898,14 @@ router.put('/profile', auth(['student', 'lecturer', 'admin']), async (req, res) 
             if (department) updateObj.department = department;
             if (officeLocation) updateObj.officeLocation = officeLocation;
             if (phoneNumber) updateObj.phoneNumber = phoneNumber;
+            if (staffId) updateObj.staffId = staffId; // Allow updating staff ID
 
             // Update fullName if honorific or name changed
             if (honorific || name) {
                 updateObj.fullName = `${honorific || user.honorific || 'Mr.'} ${name || user.name}`;
             }
+        } else if (user.role === 'student') {
+            if (studentId) updateObj.studentId = studentId; // Allow updating student ID
         }
 
         // Handle courses update
