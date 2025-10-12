@@ -5,6 +5,7 @@ const auth = require('../middleware/auth');
 
 // In-memory grades store for demo with enhanced assessment data
 const gradeStore = [
+    // Original sample data
     { courseCode: 'BIT364', studentId: '1234567', studentName: 'Ransford Student', assessmentType: 'Quiz 1', score: 18, maxScore: 20, percentage: 90, grade: 'A', submissionDate: '2025-01-20T10:30:00Z', feedback: 'Excellent work!', lecturer: 'Kwabena Lecturer' },
     { courseCode: 'BIT364', studentId: '1234567', studentName: 'Ransford Student', assessmentType: 'Assignment 1', score: 42, maxScore: 50, percentage: 84, grade: 'B+', submissionDate: '2025-01-18T14:15:00Z', feedback: 'Good analysis', lecturer: 'Kwabena Lecturer' },
     { courseCode: 'BIT364', studentId: 'S1001', studentName: 'Alice Johnson', assessmentType: 'Quiz 1', score: 16, maxScore: 20, percentage: 80, grade: 'B', submissionDate: '2025-01-20T10:32:00Z', feedback: 'Well done', lecturer: 'Kwabena Lecturer' },
@@ -12,7 +13,28 @@ const gradeStore = [
     { courseCode: 'BIT364', studentId: 'S1003', studentName: 'Carol Davis', assessmentType: 'Assignment 1', score: 38, maxScore: 50, percentage: 76, grade: 'B', submissionDate: '2025-01-18T16:20:00Z', feedback: 'Good effort', lecturer: 'Kwabena Lecturer' },
     { courseCode: 'CS101', studentId: '1234567', studentName: 'Ransford Student', assessmentType: 'Midterm Exam', score: 78, maxScore: 100, percentage: 78, grade: 'B+', submissionDate: '2025-01-15T09:00:00Z', feedback: 'Solid understanding', lecturer: 'Prof. Anyimadu' },
     { courseCode: 'CS101', studentId: 'S1001', studentName: 'Alice Johnson', assessmentType: 'Project 1', score: 88, maxScore: 100, percentage: 88, grade: 'A-', submissionDate: '2025-01-22T23:59:00Z', feedback: 'Creative solution', lecturer: 'Prof. Anyimadu' },
-    { courseCode: 'CS101', studentId: 'S1002', studentName: 'Bob Smith', assessmentType: 'Midterm Exam', score: 65, maxScore: 100, percentage: 65, grade: 'C+', submissionDate: '2025-01-15T09:00:00Z', feedback: 'Needs improvement', lecturer: 'Prof. Anyimadu' }
+    { courseCode: 'CS101', studentId: 'S1002', studentName: 'Bob Smith', assessmentType: 'Midterm Exam', score: 65, maxScore: 100, percentage: 65, grade: 'C+', submissionDate: '2025-01-15T09:00:00Z', feedback: 'Needs improvement', lecturer: 'Prof. Anyimadu' },
+    
+    // Sample data for the 4 new students in BIT364 - Web Development
+    // John Kwaku Doe (1234568)
+    { courseCode: 'BIT364', studentId: '1234568', studentName: 'John Kwaku Doe', assessmentType: 'Assessment', score: 85, maxScore: 100, percentage: 85, grade: 'B+', submissionDate: '2025-01-25T14:30:00Z', feedback: 'Good understanding of web concepts', lecturer: 'Kwabena Lecturer' },
+    { courseCode: 'BIT364', studentId: '1234568', studentName: 'John Kwaku Doe', assessmentType: 'Midsem', score: 78, maxScore: 100, percentage: 78, grade: 'B', submissionDate: '2025-01-28T10:00:00Z', feedback: 'Solid performance', lecturer: 'Kwabena Lecturer' },
+    { courseCode: 'BIT364', studentId: '1234568', studentName: 'John Kwaku Doe', assessmentType: 'End of Semester', score: 88, maxScore: 100, percentage: 88, grade: 'A-', submissionDate: '2025-02-15T09:00:00Z', feedback: 'Excellent final exam', lecturer: 'Kwabena Lecturer' },
+    
+    // Saaed Hawa (1234456)
+    { courseCode: 'BIT364', studentId: '1234456', studentName: 'Saaed Hawa', assessmentType: 'Assessment', score: 92, maxScore: 100, percentage: 92, grade: 'A', submissionDate: '2025-01-25T14:35:00Z', feedback: 'Outstanding work!', lecturer: 'Kwabena Lecturer' },
+    { courseCode: 'BIT364', studentId: '1234456', studentName: 'Saaed Hawa', assessmentType: 'Midsem', score: 89, maxScore: 100, percentage: 89, grade: 'A-', submissionDate: '2025-01-28T10:05:00Z', feedback: 'Excellent understanding', lecturer: 'Kwabena Lecturer' },
+    { courseCode: 'BIT364', studentId: '1234456', studentName: 'Saaed Hawa', assessmentType: 'End of Semester', score: 95, maxScore: 100, percentage: 95, grade: 'A', submissionDate: '2025-02-15T09:05:00Z', feedback: 'Perfect execution', lecturer: 'Kwabena Lecturer' },
+    
+    // Kwarteng Samuel (1233456)
+    { courseCode: 'BIT364', studentId: '1233456', studentName: 'Kwarteng Samuel', assessmentType: 'Assessment', score: 72, maxScore: 100, percentage: 72, grade: 'B-', submissionDate: '2025-01-25T14:40:00Z', feedback: 'Good effort, needs improvement', lecturer: 'Kwabena Lecturer' },
+    { courseCode: 'BIT364', studentId: '1233456', studentName: 'Kwarteng Samuel', assessmentType: 'Midsem', score: 75, maxScore: 100, percentage: 75, grade: 'B', submissionDate: '2025-01-28T10:10:00Z', feedback: 'Showing improvement', lecturer: 'Kwabena Lecturer' },
+    { courseCode: 'BIT364', studentId: '1233456', studentName: 'Kwarteng Samuel', assessmentType: 'End of Semester', score: 80, maxScore: 100, percentage: 80, grade: 'B+', submissionDate: '2025-02-15T09:10:00Z', feedback: 'Great progress!', lecturer: 'Kwabena Lecturer' },
+    
+    // Nashiru Alhassan (1234557)
+    { courseCode: 'BIT364', studentId: '1234557', studentName: 'Nashiru Alhassan', assessmentType: 'Assessment', score: 88, maxScore: 100, percentage: 88, grade: 'A-', submissionDate: '2025-01-25T14:45:00Z', feedback: 'Very good work', lecturer: 'Kwabena Lecturer' },
+    { courseCode: 'BIT364', studentId: '1234557', studentName: 'Nashiru Alhassan', assessmentType: 'Midsem', score: 82, maxScore: 100, percentage: 82, grade: 'B+', submissionDate: '2025-01-28T10:15:00Z', feedback: 'Strong performance', lecturer: 'Kwabena Lecturer' },
+    { courseCode: 'BIT364', studentId: '1234557', studentName: 'Nashiru Alhassan', assessmentType: 'End of Semester', score: 90, maxScore: 100, percentage: 90, grade: 'A', submissionDate: '2025-02-15T09:15:00Z', feedback: 'Excellent work throughout', lecturer: 'Kwabena Lecturer' }
 ];
 
 router.get('/', (req, res) => {
@@ -35,9 +57,174 @@ router.get('/health', (req, res) => {
             '/api/grades/semesters', 
             '/api/grades/select-result-data',
             '/api/grades/student-results',
-            '/api/grades/student/:studentId'
+            '/api/grades/student/:studentId',
+            '/api/grades/enrolled',
+            '/api/grades/history'
         ]
     });
+});
+
+// @route   GET /api/grades/enrolled
+// @desc    Get enrolled students for a course with their grades
+// @access  Private (Lecturer, Admin)
+router.get('/enrolled', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const { courseCode } = req.query;
+        
+        if (!courseCode) {
+            return res.status(400).json({
+                success: false,
+                message: 'courseCode is required'
+            });
+        }
+
+        console.log(`📚 [GRADES] Fetching enrolled students for course: ${courseCode}`);
+
+        // Get course mapping for full course name
+        let mapCoursesToFullDetails;
+        try {
+            mapCoursesToFullDetails = require('../config/courseMapping').mapCoursesToFullDetails;
+        } catch (error) {
+            mapCoursesToFullDetails = (courses) => courses.map(c => ({ code: c, fullName: c }));
+        }
+
+        const courseDetails = mapCoursesToFullDetails([courseCode])[0] || {
+            code: courseCode,
+            fullName: courseCode
+        };
+
+        // Sample students for BIT364 - Web Development
+        const sampleStudents = [
+            { studentId: '1234568', fullName: 'John Kwaku Doe', assessment: null, midsem: null, endOfSemester: null },
+            { studentId: '1234456', fullName: 'Saaed Hawa', assessment: null, midsem: null, endOfSemester: null },
+            { studentId: '1233456', fullName: 'Kwarteng Samuel', assessment: null, midsem: null, endOfSemester: null },
+            { studentId: '1234557', fullName: 'Nashiru Alhassan', assessment: null, midsem: null, endOfSemester: null }
+        ];
+
+        // Get grades for this course from gradeStore
+        const courseGrades = gradeStore.filter(g => g.courseCode === courseCode);
+
+        // Map grades to students
+        const enrolledStudents = sampleStudents.map(student => {
+            // Find grades for this student
+            const studentGrades = courseGrades.filter(g => g.studentId === student.studentId);
+            
+            // Categorize grades by assessment type
+            let assessment = null;
+            let midsem = null;
+            let endOfSemester = null;
+
+            studentGrades.forEach(grade => {
+                const type = grade.assessmentType?.toLowerCase() || '';
+                if (type.includes('quiz') || type.includes('assignment') || type === 'assessment') {
+                    assessment = grade.score;
+                } else if (type.includes('mid') || type.includes('midterm')) {
+                    midsem = grade.score;
+                } else if (type.includes('final') || type.includes('end')) {
+                    endOfSemester = grade.score;
+                }
+            });
+
+            return {
+                studentId: student.studentId,
+                fullName: student.fullName,
+                assessment: assessment,
+                midsem: midsem,
+                endOfSemester: endOfSemester,
+                totalGrades: studentGrades.length
+            };
+        });
+
+        console.log(`✅ [GRADES] Found ${enrolledStudents.length} enrolled students for ${courseCode}`);
+
+        res.json({
+            success: true,
+            courseCode: courseCode,
+            courseName: courseDetails.fullName,
+            students: enrolledStudents,
+            totalStudents: enrolledStudents.length
+        });
+
+    } catch (error) {
+        console.error('❌ [GRADES] Error fetching enrolled students:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch enrolled students',
+            error: error.message
+        });
+    }
+});
+
+// @route   GET /api/grades/history
+// @desc    Get grade history for a course (all submissions and grades)
+// @access  Private (Lecturer, Admin)
+router.get('/history', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const { courseCode } = req.query;
+        
+        if (!courseCode) {
+            return res.status(400).json({
+                success: false,
+                message: 'courseCode is required'
+            });
+        }
+
+        console.log(`📜 [GRADES] Fetching grade history for course: ${courseCode}`);
+
+        // Get course mapping for full course name
+        let mapCoursesToFullDetails;
+        try {
+            mapCoursesToFullDetails = require('../config/courseMapping').mapCoursesToFullDetails;
+        } catch (error) {
+            mapCoursesToFullDetails = (courses) => courses.map(c => ({ code: c, fullName: c }));
+        }
+
+        const courseDetails = mapCoursesToFullDetails([courseCode])[0] || {
+            code: courseCode,
+            fullName: courseCode
+        };
+
+        // Filter grades from store by courseCode
+        const courseGrades = gradeStore.filter(grade => grade.courseCode === courseCode);
+
+        // Format grades for history view
+        const formattedHistory = courseGrades.map(grade => ({
+            id: `${grade.courseCode}-${grade.studentId}-${grade.assessmentType}`,
+            studentId: grade.studentId,
+            studentName: grade.studentName,
+            assessmentType: grade.assessmentType,
+            score: grade.score,
+            maxScore: grade.maxScore,
+            percentage: grade.percentage,
+            grade: grade.grade,
+            submissionDate: grade.submissionDate,
+            feedback: grade.feedback,
+            lecturer: grade.lecturer
+        }));
+
+        // Sort by submission date (most recent first)
+        formattedHistory.sort((a, b) => new Date(b.submissionDate) - new Date(a.submissionDate));
+
+        console.log(`✅ [GRADES] Found ${formattedHistory.length} grade records for ${courseCode}`);
+
+        res.json({
+            success: true,
+            courseCode: courseCode,
+            courseName: courseDetails.fullName,
+            history: formattedHistory,
+            totalRecords: formattedHistory.length,
+            assessmentTypes: [...new Set(courseGrades.map(g => g.assessmentType))],
+            students: [...new Set(courseGrades.map(g => g.studentName))]
+        });
+
+    } catch (error) {
+        console.error('❌ [GRADES] Error fetching grade history:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch grade history',
+            error: error.message
+        });
+    }
 });
 
 // @route   GET /api/grades/student/:studentId
@@ -202,6 +389,88 @@ router.post('/update', auth(['lecturer','admin']), (req, res) => {
     const entry = { courseCode, studentId, score: Number(score ?? 0), grade: grade || null, updatedAt: new Date().toISOString() };
     if (idx >= 0) gradeStore[idx] = entry; else gradeStore.push(entry);
     res.json({ ok: true, message: 'Grade saved', grade: entry });
+});
+
+// @route   POST /api/grades/assign
+// @desc    Assign individual grade to a student
+// @access  Private (Lecturer, Admin)
+router.post('/assign', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const {
+            courseCode,
+            studentId,
+            studentName,
+            assessmentType,
+            score,
+            maxScore,
+            feedback
+        } = req.body;
+
+        // Validate required fields
+        if (!courseCode || !studentId || !assessmentType || score === undefined || !maxScore) {
+            return res.status(400).json({
+                success: false,
+                message: 'courseCode, studentId, assessmentType, score, and maxScore are required'
+            });
+        }
+
+        // Calculate percentage and letter grade
+        const percentage = Math.round((score / maxScore) * 100);
+        const letterGrade = percentage >= 90 ? 'A' :
+                           percentage >= 85 ? 'B+' :
+                           percentage >= 80 ? 'B' :
+                           percentage >= 75 ? 'B-' :
+                           percentage >= 70 ? 'C+' :
+                           percentage >= 65 ? 'C' :
+                           percentage >= 60 ? 'C-' :
+                           percentage >= 55 ? 'D+' :
+                           percentage >= 50 ? 'D' : 'F';
+
+        // Check if grade already exists for this student, course, and assessment type
+        const existingIndex = gradeStore.findIndex(g => 
+            g.courseCode === courseCode && 
+            g.studentId === studentId && 
+            g.assessmentType === assessmentType
+        );
+
+        const gradeEntry = {
+            courseCode,
+            studentId,
+            studentName: studentName || 'Unknown Student',
+            assessmentType,
+            score: Number(score),
+            maxScore: Number(maxScore),
+            percentage,
+            grade: letterGrade,
+            submissionDate: new Date().toISOString(),
+            feedback: feedback || '',
+            lecturer: req.user.name || 'Unknown Lecturer'
+        };
+
+        if (existingIndex >= 0) {
+            // Update existing grade
+            gradeStore[existingIndex] = gradeEntry;
+            console.log(`✏️ [GRADES] Updated grade for ${studentName} (${studentId}) in ${courseCode} - ${assessmentType}: ${score}/${maxScore}`);
+        } else {
+            // Add new grade
+            gradeStore.push(gradeEntry);
+            console.log(`➕ [GRADES] Added new grade for ${studentName} (${studentId}) in ${courseCode} - ${assessmentType}: ${score}/${maxScore}`);
+        }
+
+        res.json({
+            success: true,
+            message: existingIndex >= 0 ? 'Grade updated successfully' : 'Grade assigned successfully',
+            grade: gradeEntry
+        });
+
+    } catch (error) {
+        console.error('❌ [GRADES] Error assigning grade:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to assign grade',
+            error: error.message
+        });
+    }
 });
 
 // Enhanced assessment export with multiple formats
@@ -376,9 +645,8 @@ router.get('/academic-years', (req, res) => {
 // Student: Get semesters for dropdown
 router.get('/semesters', (req, res) => {
     const semesters = [
-        { value: 'semester-1', label: 'Semester 1' },
-        { value: 'semester-2', label: 'Semester 2' },
-        { value: 'semester-3', label: 'Semester 3' }
+        { value: 'Block 1', label: 'Block 1' },
+        { value: 'Block 2', label: 'Block 2' }
     ];
     res.json({
         success: true,
@@ -395,9 +663,8 @@ router.get('/select-result-data', (req, res) => {
     ];
     
     const semesters = [
-        { value: 'semester-1', label: 'Semester 1' },
-        { value: 'semester-2', label: 'Semester 2' },
-        { value: 'semester-3', label: 'Semester 3' }
+        { value: 'Block 1', label: 'Block 1' },
+        { value: 'Block 2', label: 'Block 2' }
     ];
     
     res.json({
@@ -406,7 +673,7 @@ router.get('/select-result-data', (req, res) => {
             academicYears,
             semesters,
             defaultAcademicYear: '2024-2025',
-            defaultSemester: 'semester-3'
+            defaultSemester: 'Block 1'
         }
     });
 });
