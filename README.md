@@ -15,10 +15,18 @@ Express + Mongoose API for attendance, grades, CWA, deadlines.
 
 ### Attendance
 - POST /api/attendance/check-in — student attendance (sends notification to lecturer)
-- POST /api/attendance/generate-session — lecturer QR session
+- POST /api/attendance/generate-session — lecturer QR session (auto-cleans expired sessions)
+- GET /api/attendance/active-session — check if lecturer has active session
 - GET /api/attendance/logs — lecturer logs
 - GET /api/attendance/export — CSV export
 - DELETE /api/attendance/reset — reset attendance data (lecturer only, requires confirmReset: true)
+- DELETE /api/attendance/reset/:lecturerId — reset attendance for specific lecturer (requires confirmReset: true)
+
+**Alias Routes** (for backward compatibility):
+- POST /api/attendance-sessions → /api/attendance/generate-session
+- GET /api/attendance-sessions → /api/attendance/lecturer/:id
+- DELETE /api/attendance-sessions/reset → /api/attendance/reset
+- DELETE /api/attendance-sessions/reset/:lecturerId → /api/attendance/reset/:lecturerId
 
 ### Quizzes
 - POST /api/quizzes/create — create quiz (sends notifications to students + lecturer)
@@ -79,11 +87,29 @@ Implemented via `express-rate-limit`:
 - Attendance check-in: 15 requests / 1 min per IP (reduce rapid duplicate scans)
 Responses beyond limits return 429 with JSON `{ ok: false, message: "..." }`.
 
+## Session Management
+Automatic cleanup system prevents stale sessions and 400 errors:
+
+### Features
+- **Auto-cleanup on generation**: Expired sessions removed before creating new ones
+- **Background cleanup service**: Runs every 5 minutes to remove expired sessions
+- **Parameterized reset**: Reset attendance by lecturer ID via `/api/attendance/reset/:lecturerId`
+- **Graceful shutdown**: Cleanup service stops cleanly on server termination
+
+### How It Works
+1. When lecturer generates session, system first removes any expired sessions
+2. Background service runs every 5 minutes to clean database
+3. Prevents "You already have an active session" errors
+4. Eliminates lingering 400 errors from stale data
+
+See `ATTENDANCE_SESSION_MANAGEMENT.md` for detailed documentation.
+
 ## Notes
 - CORS allows common localhost dev origins plus any origins you supply via FRONTEND_ORIGINS / FRONTEND_ORIGIN.
 - If DB is unavailable, API runs with in-memory fallbacks for attendance sessions/logs.
 - Connection pooling uses a cached global Mongoose connection (suitable for Vercel serverless cold starts).
 - Version metadata: GET /api/version → use for frontend build diagnostics.
+- Session cleanup service starts automatically with server and stops on shutdown.
 
 ## Local dev
 - npm install

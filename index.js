@@ -5,6 +5,7 @@
 const express = require("express");
 const connectDB = require("./config/db");
 const app = require("./app"); // Import the Express application
+const sessionCleanupService = require("./services/sessionCleanupService");
 // Remove reference to ensureDefaultUsers if it doesn't exist
 require("dotenv").config();
 
@@ -19,6 +20,10 @@ const startServer = async () => {
     // Connect to MongoDB
     const conn = await connectDB();
     console.log("Database connection established");
+    
+    // Start automatic session cleanup service (runs every 5 minutes)
+    sessionCleanupService.start(5);
+    console.log("Session cleanup service started");
     
     // Remove ensureDefaultUsers since it's not available
     
@@ -38,6 +43,19 @@ const startServer = async () => {
     });
   }
 };
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  sessionCleanupService.stop();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT signal received: closing HTTP server');
+  sessionCleanupService.stop();
+  process.exit(0);
+});
 
 // Start the server
 startServer();

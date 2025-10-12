@@ -243,6 +243,38 @@ router.post('/generate-session', auth(['lecturer','admin']), async (req, res) =>
         const now = new Date();
         const usingDb = mongoose.connection?.readyState === 1;
         
+        // FORCE-CLOSE STALE SESSIONS: Clean up expired sessions before checking for active ones
+        if (usingDb) {
+            try {
+                const expiredSessions = await AttendanceSession.deleteMany({
+                    $or: [
+                        { lecturerId: req.user.id },
+                        { lecturer: lecturerName }
+                    ],
+                    expiresAt: { $lte: now }
+                });
+                
+                if (expiredSessions.deletedCount > 0) {
+                    console.log(`🧹 [CLEANUP] Removed ${expiredSessions.deletedCount} expired session(s) for lecturer ${req.user.id}`);
+                }
+            } catch (cleanupError) {
+                console.error('⚠️ [CLEANUP] Failed to clean expired sessions:', cleanupError.message);
+                // Continue anyway - don't block session generation
+            }
+        } else {
+            // Clean up expired sessions from memory
+            const beforeCount = sessionsMem.length;
+            const filtered = sessionsMem.filter(s => 
+                !(s.lecturer === lecturerName && new Date(s.expiresAt) <= now)
+            );
+            sessionsMem.length = 0;
+            sessionsMem.push(...filtered);
+            
+            if (beforeCount > filtered.length) {
+                console.log(`🧹 [CLEANUP] Removed ${beforeCount - filtered.length} expired session(s) from memory`);
+            }
+        }
+        
         let existingSession = null;
         if (usingDb) {
             existingSession = await AttendanceSession.findOne({
@@ -1580,6 +1612,128 @@ router.delete('/reset', auth(['lecturer', 'admin']), async (req, res) => {
         
     } catch (error) {
         console.error('Reset attendance error:', error);
+        res.status(500).json({
+            ok: false,
+            message: 'Failed to reset attendance data',
+            error: error.message
+        });
+    }
+});
+
+// Parameterized reset endpoint: DELETE /api/attendance/reset/:lecturerId
+// This endpoint allows resetting attendance for a specific lecturer by ID
+router.delete('/reset/:lecturerId', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const targetLecturerId = req.params.lecturerId;
+        const { sessionCode, courseCode, confirmReset } = req.body;
+        
+        // Security: Only allow lecturers to reset their own data, or admins to reset anyone's
+        if (req.user.role !== 'admin' && req.user.id !== targetLecturerId) {
+            return res.status(403).json({
+                ok: false,
+                message: 'You can only reset your own attendance data'
+            });
+        }
+        
+        // Safety check - require explicit confirmation
+        if (confirmReset !== true) {
+            return res.status(400).json({
+                ok: false,
+                message: 'Please confirm reset by setting confirmReset to true',
+                warning: 'This action will delete attendance records'
+            });
+        }
+        
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        if (!usingDb) {
+            // Reset memory stores
+            const sessionsBefore = sessionsMem.length;
+            const logsBefore = attendanceLogsMem.length;
+            
+            sessionsMem.length = 0;
+            attendanceLogsMem.length = 0;
+            
+            return res.json({
+                ok: true,
+                message: 'Attendance data reset successfully (memory)',
+                deleted: {
+                    sessions: sessionsBefore,
+                    logs: logsBefore
+                }
+            });
+        }
+        
+        // Get lecturer info for name-based fallback
+        const User = require('../models/User');
+        const lecturer = await User.findById(targetLecturerId).select('name');
+        
+        if (!lecturer) {
+            return res.status(404).json({
+                ok: false,
+                message: 'Lecturer not found'
+            });
+        }
+        
+        // Build query based on provided filters
+        let sessionQuery = {};
+        let logQuery = {};
+        
+        if (sessionCode) {
+            // Reset specific session
+            sessionQuery.sessionCode = sessionCode;
+            logQuery.sessionCode = sessionCode;
+        } else if (courseCode) {
+            // Reset all sessions for a course
+            sessionQuery.courseCode = courseCode;
+            logQuery.courseCode = courseCode;
+        }
+        
+        // Filter by lecturer ID (with name fallback for old records)
+        sessionQuery.$or = [
+            { lecturerId: targetLecturerId },
+            { lecturer: lecturer.name }
+        ];
+        
+        // Find matching sessions to get their codes
+        const sessions = await AttendanceSession.find(sessionQuery).select('sessionCode');
+        const sessionCodes = sessions.map(s => s.sessionCode);
+        
+        // Update log query to match lecturer's sessions
+        if (sessionCodes.length > 0) {
+            logQuery.sessionCode = { $in: sessionCodes };
+        } else {
+            // No sessions found, try to match by lecturerId in logs
+            logQuery.$or = [
+                { lecturerId: targetLecturerId },
+                { lecturer: lecturer.name }
+            ];
+        }
+        
+        // Delete sessions and logs
+        const [deletedSessions, deletedLogs] = await Promise.all([
+            AttendanceSession.deleteMany(sessionQuery),
+            AttendanceLog.deleteMany(logQuery)
+        ]);
+        
+        console.log(`🗑️ Reset attendance: ${deletedSessions.deletedCount} sessions, ${deletedLogs.deletedCount} logs for lecturer ${targetLecturerId}`);
+        
+        res.json({
+            ok: true,
+            message: 'Attendance data reset successfully',
+            deleted: {
+                sessions: deletedSessions.deletedCount,
+                logs: deletedLogs.deletedCount
+            },
+            filters: {
+                lecturerId: targetLecturerId,
+                sessionCode: sessionCode || 'all',
+                courseCode: courseCode || 'all'
+            }
+        });
+        
+    } catch (error) {
+        console.error('Reset attendance by lecturer ID error:', error);
         res.status(500).json({
             ok: false,
             message: 'Failed to reset attendance data',
