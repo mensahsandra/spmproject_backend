@@ -126,10 +126,11 @@ app.use("/api/auth", require("./routes/auth")); // Temporarily removed authLimit
 app.use("/api/attendance", require("./routes/attendance")); // Temporarily removed attendanceLimiter
 // Alias for frontend compatibility (frontend calls /api/attendance-sessions)
 app.use("/api/attendance-sessions", require("./routes/attendance-sessions-alias"));
-// Main grades routes (includes student-results endpoint)
+// Main grades routes
 app.use("/api/grades", require("./routes/grades"));
-// Assessment routes (alias for grades for backward compatibility)
-app.use("/api/assessments", require("./routes/grades"));
+app.use("/api/grades", require("./routes/grades_v2"));
+// Assessment routes
+app.use("/api/assessments", require("./routes/assessments"));
 // Course management routes
 app.use("/api/courses", require("./routes/courses"));
 // Quiz management routes (lecturer only)
