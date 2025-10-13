@@ -94,8 +94,7 @@ const notificationSchema = new mongoose.Schema({
     index: true
   },
   expiresAt: {
-    type: Date,
-    index: true
+    type: Date
   }
 }, {
   timestamps: true

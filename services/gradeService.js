@@ -2,7 +2,7 @@
 // Centralized grade management service
 
 const User = require('../models/User');
-const { courseMapping } = require('../utils/courseMapping');
+const courseMapping = require('../config/courseMapping');
 
 /**
  * Calculate letter grade based on percentage
