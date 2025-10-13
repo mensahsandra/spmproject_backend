@@ -2,21 +2,35 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const auth = require('../middleware/auth');
 const AssessmentService = require('../services/assessmentService');
 const { AssessmentTypeValues } = require('../constants/assessmentTypes');
 
 const router = express.Router();
 
-// Configure uploads directory
+// Configure uploads directory with serverless-safe fallback
 const uploadDir = path.join(__dirname, '..', 'uploads', 'assessments');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+const fallbackDir = path.join(os.tmpdir(), 'uploads', 'assessments');
+
+function ensureDirectory(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
+
+let activeUploadDir = uploadDir;
+try {
+  ensureDirectory(uploadDir);
+} catch (error) {
+  console.warn(`Failed to create assessments upload dir at ${uploadDir}, using tmp fallback`, error.message);
+  ensureDirectory(fallbackDir);
+  activeUploadDir = fallbackDir;
 }
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadDir);
+    cb(null, activeUploadDir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
