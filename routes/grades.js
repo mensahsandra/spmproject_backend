@@ -65,7 +65,7 @@ router.get('/health', (req, res) => {
 });
 
 // @route   GET /api/grades/enrolled
-// @desc    Get enrolled students for a course with their grades
+// @desc    Get enrolled students for a course with their grades from database
 // @access  Private (Lecturer, Admin)
 router.get('/enrolled', auth(['lecturer', 'admin']), async (req, res) => {
     try {
@@ -93,56 +93,85 @@ router.get('/enrolled', auth(['lecturer', 'admin']), async (req, res) => {
             fullName: courseCode
         };
 
-        // Sample students for BIT364 - Web Development
-        const sampleStudents = [
-            { studentId: '1234568', fullName: 'John Kwaku Doe', assessment: null, midsem: null, endOfSemester: null },
-            { studentId: '1234456', fullName: 'Saaed Hawa', assessment: null, midsem: null, endOfSemester: null },
-            { studentId: '1233456', fullName: 'Kwarteng Samuel', assessment: null, midsem: null, endOfSemester: null },
-            { studentId: '1234557', fullName: 'Nashiru Alhassan', assessment: null, midsem: null, endOfSemester: null }
-        ];
-
-        // Get grades for this course from gradeStore
-        const courseGrades = gradeStore.filter(g => g.courseCode === courseCode);
-
-        // Map grades to students
-        const enrolledStudents = sampleStudents.map(student => {
-            // Find grades for this student
-            const studentGrades = courseGrades.filter(g => g.studentId === student.studentId);
+        // Try to fetch grades from database first
+        const Grade = require('../models/Grade');
+        let enrolledStudents = [];
+        
+        try {
+            console.log(`🔍 [GRADES] Querying database for course: ${courseCode}`);
             
-            // Categorize grades by assessment type
-            let assessment = null;
-            let midsem = null;
-            let endOfSemester = null;
+            // Fetch all grades for this course from database
+            const dbGrades = await Grade.find({ courseCode: courseCode }).lean();
+            console.log(`📊 [GRADES] Found ${dbGrades.length} grade records in database`);
+            
+            if (dbGrades.length > 0) {
+                // Map database grades to student format
+                enrolledStudents = dbGrades.map(grade => ({
+                    studentId: grade.studentId,
+                    fullName: grade.studentName,
+                    assessment: grade.classAssessment,
+                    midsem: grade.midSemester,
+                    endOfSemester: grade.endOfSemester,
+                    classAssessment: grade.classAssessment, // Additional field for new frontend
+                    midSemester: grade.midSemester,         // Additional field for new frontend
+                    totalGrades: [grade.classAssessment, grade.midSemester, grade.endOfSemester].filter(g => g !== null).length,
+                    academicYear: grade.academicYear,
+                    semester: grade.semester,
+                    block: grade.block,
+                    dateEntered: grade.dateEntered,
+                    lecturer: grade.lecturer
+                }));
+                
+                console.log(`✅ [GRADES] Mapped ${enrolledStudents.length} students from database`);
+                enrolledStudents.forEach(student => {
+                    console.log(`   - ${student.fullName}: Class=${student.classAssessment || 'null'}, Mid=${student.midSemester || 'null'}, End=${student.endOfSemester || 'null'}`);
+                });
+            }
+        } catch (dbError) {
+            console.error('❌ [GRADES] Database fetch failed:', dbError.message);
+            console.log('⚠️ [GRADES] Falling back to sample data');
+        }
+        
+        // If no database records, provide sample students with empty grades
+        if (enrolledStudents.length === 0) {
+            console.log(`📝 [GRADES] No database records found, using sample students for ${courseCode}`);
+            
+            const sampleStudents = [
+                { studentId: '1234568', fullName: 'John Kwaku Doe' },
+                { studentId: '1234456', fullName: 'Saaed Hawa' },
+                { studentId: '1233456', fullName: 'Kwarteng Samuel' },
+                { studentId: '1234557', fullName: 'Nashiru Alhassan' },
+                { studentId: '5', fullName: 'Alice Johnson' },
+                { studentId: '2', fullName: 'Mercy Johnson' }
+            ];
 
-            studentGrades.forEach(grade => {
-                const type = grade.assessmentType?.toLowerCase() || '';
-                if (type.includes('quiz') || type.includes('assignment') || type === 'assessment') {
-                    assessment = grade.score;
-                } else if (type.includes('mid') || type.includes('midterm')) {
-                    midsem = grade.score;
-                } else if (type.includes('final') || type.includes('end')) {
-                    endOfSemester = grade.score;
-                }
-            });
-
-            return {
+            enrolledStudents = sampleStudents.map(student => ({
                 studentId: student.studentId,
                 fullName: student.fullName,
-                assessment: assessment,
-                midsem: midsem,
-                endOfSemester: endOfSemester,
-                totalGrades: studentGrades.length
-            };
-        });
+                assessment: null,
+                midsem: null,
+                endOfSemester: null,
+                classAssessment: null,
+                midSemester: null,
+                totalGrades: 0,
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                block: 'Block A',
+                dateEntered: null,
+                lecturer: null
+            }));
+        }
 
-        console.log(`✅ [GRADES] Found ${enrolledStudents.length} enrolled students for ${courseCode}`);
+        console.log(`✅ [GRADES] Returning ${enrolledStudents.length} enrolled students for ${courseCode}`);
 
         res.json({
             success: true,
             courseCode: courseCode,
             courseName: courseDetails.fullName,
             students: enrolledStudents,
-            totalStudents: enrolledStudents.length
+            totalStudents: enrolledStudents.length,
+            dataSource: enrolledStudents.length > 0 && enrolledStudents[0].dateEntered ? 'database' : 'sample',
+            lastUpdated: new Date().toISOString()
         });
 
     } catch (error) {
@@ -850,6 +879,346 @@ router.post('/bulk-assign', auth(['lecturer', 'admin']), async (req, res) => {
         res.status(500).json({
             ok: false,
             message: 'Failed to assign bulk grades',
+            error: error.message
+        });
+    }
+});
+
+// @route   PUT /api/grades/update-student
+// @desc    Update individual student grades from assessment interface
+// @access  Private (Lecturer, Admin)
+router.put('/update-student', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const { studentId, courseCode, classAssessment, midSemester, endOfSemester } = req.body;
+        
+        if (!studentId || !courseCode) {
+            return res.status(400).json({
+                success: false,
+                message: 'studentId and courseCode are required'
+            });
+        }
+
+        console.log(`📝 [GRADES] Updating grades for student ${studentId} in course ${courseCode}`);
+        console.log(`📊 [GRADES] New grades - Class: ${classAssessment}, Mid: ${midSemester}, End: ${endOfSemester}`);
+
+        const Grade = require('../models/Grade');
+        let result = null;
+
+        try {
+            // Try to update existing record or create new one
+            const updateData = {
+                ...(classAssessment !== null && classAssessment !== undefined && { classAssessment: Number(classAssessment) }),
+                ...(midSemester !== null && midSemester !== undefined && { midSemester: Number(midSemester) }),
+                ...(endOfSemester !== null && endOfSemester !== undefined && { endOfSemester: Number(endOfSemester) }),
+                dateEntered: new Date(),
+                lecturer: req.user?.name || 'Unknown Lecturer',
+                lecturerId: req.user?.id
+            };
+
+            result = await Grade.findOneAndUpdate(
+                { studentId: studentId, courseCode: courseCode },
+                updateData,
+                { 
+                    new: true, 
+                    upsert: true,
+                    setDefaultsOnInsert: true
+                }
+            );
+
+            console.log(`✅ [GRADES] Successfully updated database record for student ${studentId}`);
+
+        } catch (dbError) {
+            console.error('❌ [GRADES] Database update failed:', dbError.message);
+            
+            // Fallback to in-memory store update
+            console.log('⚠️ [GRADES] Falling back to in-memory update');
+            
+            // Update or add to gradeStore for immediate response
+            const existingGradeIndex = gradeStore.findIndex(g => 
+                g.studentId === studentId && g.courseCode === courseCode
+            );
+
+            const gradeData = {
+                courseCode,
+                studentId,
+                studentName: 'Student', // You might want to fetch this
+                assessmentType: 'Mixed',
+                score: classAssessment || midSemester || endOfSemester || 0,
+                classAssessment,
+                midSemester,
+                endOfSemester,
+                submissionDate: new Date().toISOString(),
+                lecturer: req.user?.name || 'Unknown Lecturer'
+            };
+
+            if (existingGradeIndex >= 0) {
+                gradeStore[existingGradeIndex] = { ...gradeStore[existingGradeIndex], ...gradeData };
+            } else {
+                gradeStore.push(gradeData);
+            }
+        }
+
+        res.json({
+            success: true,
+            message: `Successfully updated grades for student ${studentId}`,
+            studentId,
+            courseCode,
+            updatedGrades: {
+                classAssessment: classAssessment !== null && classAssessment !== undefined ? Number(classAssessment) : null,
+                midSemester: midSemester !== null && midSemester !== undefined ? Number(midSemester) : null,
+                endOfSemester: endOfSemester !== null && endOfSemester !== undefined ? Number(endOfSemester) : null
+            },
+            databaseUpdated: !!result,
+            updatedAt: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('❌ [GRADES] Error updating student grades:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update student grades',
+            error: error.message
+        });
+    }
+});
+
+// @route   POST /api/grades/bulk-update
+// @desc    Update multiple student grades at once from assessment interface
+// @access  Private (Lecturer, Admin)
+router.post('/bulk-update', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const { courseCode, updates } = req.body;
+        
+        if (!courseCode || !updates || !Array.isArray(updates)) {
+            return res.status(400).json({
+                success: false,
+                message: 'courseCode and updates array are required'
+            });
+        }
+
+        console.log(`📝 [GRADES] Bulk updating ${updates.length} student grades for course ${courseCode}`);
+
+        const Grade = require('../models/Grade');
+        const results = [];
+        let dbUpdated = 0;
+        let memoryUpdated = 0;
+
+        for (const update of updates) {
+            const { studentId, classAssessment, midSemester, endOfSemester } = update;
+            
+            if (!studentId) {
+                console.warn(`⚠️ [GRADES] Skipping update - missing studentId`);
+                continue;
+            }
+
+            try {
+                const updateData = {
+                    ...(classAssessment !== null && classAssessment !== undefined && { classAssessment: Number(classAssessment) }),
+                    ...(midSemester !== null && midSemester !== undefined && { midSemester: Number(midSemester) }),
+                    ...(endOfSemester !== null && endOfSemester !== undefined && { endOfSemester: Number(endOfSemester) }),
+                    dateEntered: new Date(),
+                    lecturer: req.user?.name || 'Unknown Lecturer',
+                    lecturerId: req.user?.id
+                };
+
+                const result = await Grade.findOneAndUpdate(
+                    { studentId: studentId, courseCode: courseCode },
+                    updateData,
+                    { 
+                        new: true, 
+                        upsert: true,
+                        setDefaultsOnInsert: true
+                    }
+                );
+
+                results.push({
+                    studentId,
+                    success: true,
+                    updated: updateData
+                });
+                dbUpdated++;
+
+            } catch (dbError) {
+                console.error(`❌ [GRADES] Failed to update student ${studentId}:`, dbError.message);
+                
+                // Add to results as failed
+                results.push({
+                    studentId,
+                    success: false,
+                    error: dbError.message
+                });
+            }
+        }
+
+        console.log(`✅ [GRADES] Bulk update complete - DB: ${dbUpdated}, Memory: ${memoryUpdated}, Total: ${results.length}`);
+
+        res.json({
+            success: true,
+            message: `Successfully processed ${results.length} grade updates`,
+            courseCode,
+            totalUpdates: results.length,
+            databaseUpdates: dbUpdated,
+            memoryUpdates: memoryUpdated,
+            results: results,
+            updatedAt: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('❌ [GRADES] Error in bulk update:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to process bulk grade updates',
+            error: error.message
+        });
+    }
+});
+
+// @route   GET /api/grades/student-performance
+// @desc    Get student performance data formatted for assessment page
+// @access  Private (Lecturer, Admin)
+router.get('/student-performance', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const { courseCode, academicYear = '2024/2025' } = req.query;
+        
+        if (!courseCode) {
+            return res.status(400).json({
+                success: false,
+                message: 'courseCode is required'
+            });
+        }
+
+        console.log(`📊 [STUDENT-PERFORMANCE] Fetching performance data for course: ${courseCode}`);
+
+        const Grade = require('../models/Grade');
+        let performanceData = [];
+
+        try {
+            // Fetch from database
+            const dbGrades = await Grade.find({ 
+                courseCode: courseCode,
+                academicYear: academicYear 
+            }).lean();
+
+            console.log(`📈 [STUDENT-PERFORMANCE] Found ${dbGrades.length} records in database`);
+
+            if (dbGrades.length > 0) {
+                performanceData = dbGrades.map(grade => ({
+                    id: grade._id,
+                    studentId: grade.studentId,
+                    studentName: grade.studentName,
+                    academicYear: grade.academicYear,
+                    semester: grade.semester,
+                    block: grade.block,
+                    classAssessment: grade.classAssessment,
+                    midSemester: grade.midSemester,
+                    endOfSemester: grade.endOfSemester,
+                    dateEntered: grade.dateEntered,
+                    lecturer: grade.lecturer,
+                    // Calculate additional metrics
+                    totalScore: [grade.classAssessment, grade.midSemester, grade.endOfSemester]
+                        .filter(score => score !== null && score !== undefined)
+                        .reduce((sum, score) => sum + score, 0),
+                    completedAssessments: [grade.classAssessment, grade.midSemester, grade.endOfSemester]
+                        .filter(score => score !== null && score !== undefined).length,
+                    averageScore: (() => {
+                        const scores = [grade.classAssessment, grade.midSemester, grade.endOfSemester]
+                            .filter(score => score !== null && score !== undefined);
+                        return scores.length > 0 ? (scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(1) : null;
+                    })(),
+                    status: (() => {
+                        const hasAll = grade.classAssessment !== null && grade.midSemester !== null && grade.endOfSemester !== null;
+                        const hasPartial = grade.classAssessment !== null || grade.midSemester !== null || grade.endOfSemester !== null;
+                        return hasAll ? 'Complete' : hasPartial ? 'Partial' : 'Empty';
+                    })()
+                }));
+            } else {
+                // Provide empty template data
+                console.log(`📝 [STUDENT-PERFORMANCE] No database records, providing empty template`);
+                const sampleStudents = [
+                    { studentId: '1234568', studentName: 'John Kwaku Doe' },
+                    { studentId: '1234456', studentName: 'Saaed Hawa' },
+                    { studentId: '1233456', studentName: 'Kwarteng Samuel' },
+                    { studentId: '1234557', studentName: 'Nashiru Alhassan' },
+                    { studentId: '5', studentName: 'Alice Johnson' },
+                    { studentId: '2', studentName: 'Mercy Johnson' }
+                ];
+
+                performanceData = sampleStudents.map(student => ({
+                    id: null,
+                    studentId: student.studentId,
+                    studentName: student.studentName,
+                    academicYear: academicYear,
+                    semester: 'Semester 1',
+                    block: 'Block A',
+                    classAssessment: null,
+                    midSemester: null,
+                    endOfSemester: null,
+                    dateEntered: null,
+                    lecturer: null,
+                    totalScore: 0,
+                    completedAssessments: 0,
+                    averageScore: null,
+                    status: 'Empty'
+                }));
+            }
+
+        } catch (dbError) {
+            console.error('❌ [STUDENT-PERFORMANCE] Database error:', dbError.message);
+            return res.status(500).json({
+                success: false,
+                message: 'Database error occurred',
+                error: dbError.message
+            });
+        }
+
+        // Get course details
+        let courseDetails;
+        try {
+            const mapCoursesToFullDetails = require('../config/courseMapping').mapCoursesToFullDetails;
+            courseDetails = mapCoursesToFullDetails([courseCode])[0] || {
+                code: courseCode,
+                fullName: courseCode
+            };
+        } catch (error) {
+            courseDetails = { code: courseCode, fullName: courseCode };
+        }
+
+        console.log(`✅ [STUDENT-PERFORMANCE] Returning ${performanceData.length} student performance records`);
+
+        res.json({
+            success: true,
+            courseCode: courseCode,
+            courseName: courseDetails.fullName,
+            academicYear: academicYear,
+            totalStudents: performanceData.length,
+            studentsWithGrades: performanceData.filter(s => s.status !== 'Empty').length,
+            students: performanceData,
+            summary: {
+                totalAssessments: 3, // Class, Mid, End
+                completionRate: performanceData.length > 0 ? 
+                    ((performanceData.filter(s => s.status === 'Complete').length / performanceData.length) * 100).toFixed(1) : 0,
+                averageClassScore: (() => {
+                    const scores = performanceData.map(s => s.classAssessment).filter(s => s !== null);
+                    return scores.length > 0 ? (scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(1) : null;
+                })(),
+                averageMidScore: (() => {
+                    const scores = performanceData.map(s => s.midSemester).filter(s => s !== null);
+                    return scores.length > 0 ? (scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(1) : null;
+                })(),
+                averageEndScore: (() => {
+                    const scores = performanceData.map(s => s.endOfSemester).filter(s => s !== null);
+                    return scores.length > 0 ? (scores.reduce((sum, score) => sum + score, 0) / scores.length).toFixed(1) : null;
+                })()
+            },
+            dataSource: performanceData.length > 0 && performanceData[0].dateEntered ? 'database' : 'template',
+            lastUpdated: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('❌ [STUDENT-PERFORMANCE] Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch student performance data',
             error: error.message
         });
     }
