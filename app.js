@@ -142,6 +142,9 @@ app.use("/api/deadlines", require("./routes/deadlines"));
 
 app.use("/api/results", require("./routes/results"));
 
+// Admin routes (temporary for database seeding)
+app.use("/api/admin", require("./routes/admin"));
+
 // Notification routes
 app.use("/api/notifications", require("./routes/notifications"));
 
