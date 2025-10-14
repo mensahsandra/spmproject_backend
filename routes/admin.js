@@ -179,4 +179,149 @@ router.get('/verify-data', async (req, res) => {
     }
 });
 
+// @route   POST /api/admin/seed-student-users
+// @desc    Seed student users for notifications (production)
+// @access  Public (temporary)
+router.post('/seed-student-users', async (req, res) => {
+    try {
+        console.log('👥 [ADMIN] Starting student user seeding...');
+        
+        const User = require('../models/User');
+        
+        const testStudents = [
+            {
+                name: 'Alice Johnson',
+                email: 'alice.johnson@student.edu.gh',
+                studentId: '5',
+                role: 'student',
+                courses: ['BIT364', 'BIT301'],
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                centre: 'Accra Campus',
+                password: 'password123'
+            },
+            {
+                name: 'Mercy Johnson',
+                email: 'mercy.johnson@student.edu.gh',
+                studentId: '2',
+                role: 'student',
+                courses: ['BIT364', 'BIT301'],
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                centre: 'Accra Campus',
+                password: 'password123'
+            },
+            {
+                name: 'John Kwaku Doe',
+                email: 'john.doe@student.edu.gh',
+                studentId: '1234568',
+                role: 'student',
+                courses: ['BIT364', 'BIT301'],
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                centre: 'Accra Campus',
+                password: 'password123'
+            },
+            {
+                name: 'Saaed Hawa',
+                email: 'saaed.hawa@student.edu.gh',
+                studentId: '1234456',
+                role: 'student',
+                courses: ['BIT364', 'BIT301'],
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                centre: 'Kumasi Campus',
+                password: 'password123'
+            },
+            {
+                name: 'Kwarteng Samuel',
+                email: 'kwarteng.samuel@student.edu.gh',
+                studentId: '1233456',
+                role: 'student',
+                courses: ['BIT364', 'BIT301'],
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                centre: 'Tamale Campus',
+                password: 'password123'
+            },
+            {
+                name: 'Nashiru Alhassan',
+                email: 'nashiru.alhassan@student.edu.gh',
+                studentId: '1234557',
+                role: 'student',
+                courses: ['BIT364', 'BIT301'],
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                centre: 'Accra Campus',
+                password: 'password123'
+            }
+        ];
+        
+        const results = {
+            created: [],
+            updated: [],
+            errors: []
+        };
+        
+        for (const studentData of testStudents) {
+            try {
+                const existingStudent = await User.findOne({ 
+                    $or: [
+                        { email: studentData.email },
+                        { studentId: studentData.studentId }
+                    ]
+                });
+                
+                if (existingStudent) {
+                    await User.findByIdAndUpdate(existingStudent._id, {
+                        courses: studentData.courses,
+                        academicYear: studentData.academicYear,
+                        semester: studentData.semester,
+                        centre: studentData.centre
+                    });
+                    results.updated.push(studentData.name);
+                } else {
+                    await User.create(studentData);
+                    results.created.push(studentData.name);
+                }
+            } catch (error) {
+                results.errors.push({ name: studentData.name, error: error.message });
+            }
+        }
+        
+        // Verify students enrolled in BIT364
+        const bit364Students = await User.find({ 
+            role: 'student',
+            courses: 'BIT364' 
+        }).select('name studentId courses');
+        
+        res.json({
+            success: true,
+            message: 'Student users seeded successfully',
+            results: {
+                studentsCreated: results.created.length,
+                studentsUpdated: results.updated.length,
+                errors: results.errors.length,
+                totalBIT364Enrolled: bit364Students.length
+            },
+            created: results.created,
+            updated: results.updated,
+            errors: results.errors,
+            bit364Students: bit364Students.map(s => ({
+                name: s.name,
+                studentId: s.studentId,
+                courses: s.courses
+            }))
+        });
+        
+    } catch (error) {
+        console.error('❌ [ADMIN] Error seeding student users:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to seed student users',
+            error: error.message
+        });
+    }
+});
+
 module.exports = router;
