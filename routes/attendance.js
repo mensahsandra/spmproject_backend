@@ -29,103 +29,142 @@ router.get('/checkin', (req, res) => {
 
 // QR-based check-in (preferred)
 router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) => {
-    const { studentId, qrCode, sessionCode: bodySessionCode, timestamp, centre, location } = req.body || {};
-    
-    // Validate required fields
-    if (!studentId || (!qrCode && !bodySessionCode)) {
-        return res.status(400).json({ ok: false, message: 'studentId and qrCode or sessionCode are required' });
-    }
-    
-    // Only allow students to check in (security measure)
-    if (req.user.role !== 'student' && req.user.role !== 'admin') {
-        return res.status(403).json({ ok: false, message: 'Only students can check in to attendance' });
-    }
-    
-    let parsed = null;
-    try { parsed = qrCode ? JSON.parse(qrCode) : null; } catch {}
-    const sessionCode = bodySessionCode || parsed?.sessionCode || parsed?.qrCode || qrCode;
-    
-    // Verify session exists and is still active
-    const usingDb = mongoose.connection?.readyState === 1;
-    let session = null;
-    
-    if (usingDb) {
-        session = await AttendanceSession.findOne({ sessionCode }).lean();
-    } else {
-        session = sessionsMem.find(s => s.sessionCode === sessionCode);
-    }
-    
-    if (!session) {
-        return res.status(404).json({ ok: false, message: 'Invalid session code' });
-    }
-    
-    // Check if session has expired
-    const now = new Date();
-    const expiresAt = new Date(session.expiresAt);
-    if (now > expiresAt) {
-        return res.status(400).json({ ok: false, message: 'Session has expired' });
-    }
-    
-    const nowIso = timestamp || new Date().toISOString();
-    
-    // Get full student information from database
-    const User = require('../models/User');
-    let studentInfo = null;
-    
     try {
-        studentInfo = await User.findById(req.user.id).select('name studentId course centre').lean();
-    } catch (error) {
-        console.log('Could not fetch student info:', error.message);
-    }
-    
-    // Get lecturer ID - either from session or by looking up lecturer by name
-    let lecturerId = session.lecturerId;
-    console.log('🔍 [CHECK-IN] Session lecturerId:', lecturerId);
-    console.log('🔍 [CHECK-IN] Session lecturer name:', session.lecturer);
-    console.log('🔍 [CHECK-IN] Full session:', JSON.stringify(session, null, 2));
-    
-    // FALLBACK: If session doesn't have lecturerId (old session), look it up by name
-    if (!lecturerId && session.lecturer) {
-        console.log('⚠️ [CHECK-IN] No lecturerId in session, attempting name lookup...');
-        try {
-            const User = require('../models/User');
-            const lecturer = await User.findOne({ name: session.lecturer }).select('_id');
-            if (lecturer) {
-                lecturerId = lecturer._id;
-                console.log('✅ [CHECK-IN] Found lecturerId by name lookup:', lecturerId);
-            } else {
-                console.warn('⚠️ [CHECK-IN] Could not find lecturer by name:', session.lecturer);
-            }
-        } catch (err) {
-            console.error('❌ [CHECK-IN] Error looking up lecturer:', err);
+        console.log(`📥 [CHECK-IN] Request body:`, JSON.stringify(req.body, null, 2));
+        console.log(`👤 [CHECK-IN] User info:`, JSON.stringify(req.user, null, 2));
+        
+        const { studentId, qrCode, sessionCode: bodySessionCode, timestamp, centre, location } = req.body || {};
+        
+        // Use authenticated user's studentId if not provided
+        const actualStudentId = studentId || req.user?.studentId || req.user?.id;
+        
+        // Validate required fields
+        if (!actualStudentId || (!qrCode && !bodySessionCode)) {
+            console.error(`❌ [CHECK-IN] Missing required fields - studentId: ${actualStudentId}, qrCode: ${!!qrCode}, sessionCode: ${bodySessionCode}`);
+            return res.status(400).json({ 
+                ok: false, 
+                message: 'studentId and qrCode or sessionCode are required',
+                received: {
+                    studentId: actualStudentId,
+                    hasQrCode: !!qrCode,
+                    sessionCode: bodySessionCode
+                }
+            });
         }
-    } else if (lecturerId) {
-        console.log('✅ [CHECK-IN] Using lecturerId from session:', lecturerId);
-    }
-    
-    // Enhanced entry with complete student information
-    const baseEntry = {
-        studentId: studentId || req.user.studentId || studentInfo?.studentId,
-        studentName: studentInfo?.name || req.user.name || 'Unknown Student',
-        sessionCode,
-        qrRaw: qrCode || null,
-        courseCode: parsed?.courseCode || session.courseCode,
-        courseName: parsed?.course || parsed?.courseName || session.courseName,
-        lecturer: parsed?.lecturer || parsed?.lecturerName || session.lecturer,
-        lecturerId: lecturerId,  // CRITICAL: Get lecturer ID from session or lookup
-        centre: centre || req.user.centre || studentInfo?.centre || 'Not specified',
-        location: location || null,
-        timestamp: nowIso,
-        checkInMethod: qrCode ? 'QR_SCAN' : 'MANUAL_CODE'
+        
+        // Only allow students to check in (security measure)
+        if (req.user.role !== 'student' && req.user.role !== 'admin') {
+            console.error(`❌ [CHECK-IN] Unauthorized role: ${req.user.role}`);
+            return res.status(403).json({ ok: false, message: 'Only students can check in to attendance' });
+        }
+        
+        let parsed = null;
+        try { 
+            parsed = qrCode ? JSON.parse(qrCode) : null; 
+        } catch (parseError) {
+            console.warn(`⚠️ [CHECK-IN] Failed to parse QR code JSON:`, parseError.message);
+        }
+        
+        const sessionCode = bodySessionCode || parsed?.sessionCode || parsed?.qrCode || qrCode;
+        console.log(`🔍 [CHECK-IN] Using session code: ${sessionCode}`);
+        
+        // Verify session exists and is still active
+        const usingDb = mongoose.connection?.readyState === 1;
+        let session = null;
+        
+        if (usingDb) {
+            session = await AttendanceSession.findOne({ sessionCode }).lean();
+            console.log(`🔍 [CHECK-IN] Database session lookup result:`, session ? 'Found' : 'Not found');
+        } else {
+            session = sessionsMem.find(s => s.sessionCode === sessionCode);
+            console.log(`🔍 [CHECK-IN] Memory session lookup result:`, session ? 'Found' : 'Not found');
+            console.log(`🔍 [CHECK-IN] Available memory sessions:`, sessionsMem.map(s => s.sessionCode));
+        }
+        
+        if (!session) {
+            console.error(`❌ [CHECK-IN] Session not found for code: ${sessionCode}`);
+            return res.status(404).json({ 
+                ok: false, 
+                message: 'Invalid session code',
+                sessionCode: sessionCode,
+                usingDatabase: usingDb
+            });
+        }
+        
+        // Check if session has expired
+        const now = new Date();
+        const expiresAt = new Date(session.expiresAt);
+        console.log(`⏰ [CHECK-IN] Session expires at: ${expiresAt.toISOString()}, Current time: ${now.toISOString()}`);
+        
+        if (now > expiresAt) {
+            console.error(`❌ [CHECK-IN] Session expired - expires: ${expiresAt.toISOString()}, now: ${now.toISOString()}`);
+            return res.status(400).json({ 
+                ok: false, 
+                message: 'Session has expired',
+                expiresAt: session.expiresAt,
+                currentTime: now.toISOString()
+            });
+        }
+        
+        const nowIso = timestamp || new Date().toISOString();
+        
+        // Get full student information from database
+        const User = require('../models/User');
+        let studentInfo = null;
+        
+        try {
+            studentInfo = await User.findById(req.user.id).select('name studentId course centre').lean();
+            console.log(`👤 [CHECK-IN] Student info from DB:`, studentInfo);
+        } catch (error) {
+            console.warn('⚠️ [CHECK-IN] Could not fetch student info:', error.message);
+        }
+        
+        // Get lecturer ID - either from session or by looking up lecturer by name
+        let lecturerId = session.lecturerId;
+        console.log('🔍 [CHECK-IN] Session lecturerId:', lecturerId);
+        console.log('🔍 [CHECK-IN] Session lecturer name:', session.lecturer);
+        
+        // FALLBACK: If session doesn't have lecturerId (old session), look it up by name
+        if (!lecturerId && session.lecturer) {
+            console.log('⚠️ [CHECK-IN] No lecturerId in session, attempting name lookup...');
+            try {
+                const lecturer = await User.findOne({ name: session.lecturer }).select('_id');
+                if (lecturer) {
+                    lecturerId = lecturer._id;
+                    console.log('✅ [CHECK-IN] Found lecturerId by name lookup:', lecturerId);
+                } else {
+                    console.warn('⚠️ [CHECK-IN] Could not find lecturer by name:', session.lecturer);
+                }
+            } catch (err) {
+                console.error('❌ [CHECK-IN] Error looking up lecturer:', err);
+            }
+        } else if (lecturerId) {
+            console.log('✅ [CHECK-IN] Using lecturerId from session:', lecturerId);
+        }
+        
+        // Enhanced entry with complete student information
+        const baseEntry = {
+            studentId: actualStudentId,
+            studentName: studentInfo?.name || req.user.name || 'Unknown Student',
+            sessionCode,
+            qrRaw: qrCode || null,
+            courseCode: parsed?.courseCode || session.courseCode,
+            courseName: parsed?.course || parsed?.courseName || session.courseName,
+            lecturer: parsed?.lecturer || parsed?.lecturerName || session.lecturer,
+            lecturerId: lecturerId,  // CRITICAL: Get lecturer ID from session or lookup
+            centre: centre || req.user.centre || studentInfo?.centre || 'Not specified',
+            location: location || null,
+            timestamp: nowIso,
+            checkInMethod: qrCode ? 'QR_SCAN' : 'MANUAL_CODE'
     };
-    
-    console.log('📝 Creating attendance with lecturerId:', lecturerId ? '✅ Present' : '❌ Missing');
-    
-    try {
+        
+        console.log('📝 [CHECK-IN] Creating attendance record with data:', JSON.stringify(baseEntry, null, 2));
+        
         if (usingDb) {
             // Check if student already checked in for this session
             const existing = await AttendanceLog.findOne({ sessionCode, studentId: baseEntry.studentId });
             if (existing) {
+                console.log(`✅ [CHECK-IN] Student already checked in:`, existing.timestamp);
                 return res.json({ 
                     ok: true, 
                     message: 'Already checked in for this session', 
@@ -136,19 +175,22 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
             }
             
             const created = await AttendanceLog.create(baseEntry);
+            console.log(`✅ [CHECK-IN] Successfully created attendance log:`, created._id);
             
             // Send notification to lecturer about the check-in
             if (lecturerId) {
                 try {
                     await NotificationService.notifyAttendanceScan(created, lecturerId);
+                    console.log(`📧 [CHECK-IN] Notification sent to lecturer:`, lecturerId);
                 } catch (notifyError) {
-                    console.error('Failed to send attendance notification:', notifyError.message);
+                    console.error('⚠️ [CHECK-IN] Failed to send attendance notification:', notifyError.message);
                     // Don't fail the check-in if notification fails
                 }
             }
             
             return res.json({ 
                 ok: true, 
+                success: true,
                 message: 'Attendance marked successfully', 
                 persisted: true, 
                 log: created,
@@ -161,6 +203,7 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
         } else {
             const exists = attendanceLogsMem.find(l => l.sessionCode === sessionCode && l.studentId === baseEntry.studentId);
             if (exists) {
+                console.log(`✅ [CHECK-IN] Student already checked in (memory):`, exists.timestamp);
                 return res.json({ 
                     ok: true, 
                     message: 'Already checked in for this session', 
@@ -172,8 +215,11 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
             
             const newEntry = { id: Date.now().toString(36), ...baseEntry };
             attendanceLogsMem.push(newEntry);
+            console.log(`✅ [CHECK-IN] Successfully added to memory:`, newEntry.id);
+            
             return res.json({ 
                 ok: true, 
+                success: true,
                 message: 'Attendance marked successfully (memory)', 
                 persisted: false, 
                 log: newEntry,
@@ -185,8 +231,47 @@ router.post('/check-in', auth(['student','lecturer','admin']), async (req, res) 
             });
         }
     } catch (e) {
-        console.error('check-in error:', e);
-        return res.status(500).json({ ok: false, message: 'Failed to record attendance', error: String(e?.message || e) });
+        console.error('❌ [CHECK-IN] Error recording attendance:', e);
+        return res.status(500).json({ 
+            ok: false, 
+            success: false,
+            message: 'Failed to record attendance', 
+            error: String(e?.message || e),
+            details: {
+                sessionCode: sessionCode,
+                studentId: actualStudentId,
+                usingDatabase: usingDb
+            }
+        });
+    }
+});
+
+// Alternative attendance endpoint for students (simpler interface)
+router.post('/record', auth(['student']), async (req, res) => {
+    try {
+        console.log(`📥 [RECORD] Student attendance request:`, JSON.stringify(req.body, null, 2));
+        const { sessionCode, qrData } = req.body;
+        
+        // Use the main check-in logic but with student-specific defaults
+        const checkInData = {
+            studentId: req.user.studentId || req.user.id,
+            sessionCode: sessionCode,
+            qrCode: qrData,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Redirect to main check-in endpoint
+        req.body = checkInData;
+        return router.post('/check-in').handler(req, res);
+        
+    } catch (error) {
+        console.error('❌ [RECORD] Error in student record endpoint:', error);
+        return res.status(500).json({
+            ok: false,
+            success: false,
+            message: 'Failed to record attendance',
+            error: error.message
+        });
     }
 });
 
@@ -236,18 +321,30 @@ router.get('/active-session', auth(['lecturer','admin']), async (req, res) => {
 // Lecturer: generate a session code and QR image
 router.post('/generate-session', auth(['lecturer','admin']), async (req, res) => {
     try {
-        const { courseCode = 'BIT364', courseName = 'Entrepreneurship', lecturer, durationMinutes } = req.body || {};
+        console.log(`📥 [SESSION-GEN] Full request body:`, JSON.stringify(req.body, null, 2));
+        
+        const { courseCode = 'BIT364', courseName = 'Entrepreneurship', lecturer, durationMinutes, duration } = req.body || {};
         
         // Parse duration with proper validation and default
-        let duration = 30; // Default 30 minutes
-        if (durationMinutes !== undefined && durationMinutes !== null) {
-            const parsedDuration = parseInt(durationMinutes, 10);
+        // Check both 'durationMinutes' and 'duration' fields from frontend
+        let finalDuration = 30; // Default 30 minutes
+        const durationValue = durationMinutes || duration;
+        
+        console.log(`⏰ [SESSION-GEN] Raw duration values - durationMinutes: ${durationMinutes}, duration: ${duration}, using: ${durationValue}`);
+        
+        if (durationValue !== undefined && durationValue !== null && durationValue !== '') {
+            const parsedDuration = parseInt(durationValue, 10);
             if (!isNaN(parsedDuration) && parsedDuration > 0 && parsedDuration <= 240) { // Max 4 hours
-                duration = parsedDuration;
+                finalDuration = parsedDuration;
+                console.log(`✅ [SESSION-GEN] Using parsed duration: ${finalDuration} minutes`);
+            } else {
+                console.log(`⚠️ [SESSION-GEN] Invalid duration value: ${durationValue}, using default: ${finalDuration}`);
             }
+        } else {
+            console.log(`⚠️ [SESSION-GEN] No duration provided, using default: ${finalDuration} minutes`);
         }
         
-        console.log(`⏰ [SESSION-GEN] Duration requested: ${durationMinutes}, Using: ${duration} minutes`);
+        console.log(`⏰ [SESSION-GEN] Final duration: ${finalDuration} minutes`);
         
         // Check if lecturer already has an active session
         const lecturerName = lecturer || req.user?.name || 'Prof. Anyimadu';
@@ -314,9 +411,9 @@ router.post('/generate-session', auth(['lecturer','admin']), async (req, res) =>
         
         const sessionCode = randomCode(6) + '-' + randomCode(6);
         const issuedAt = new Date();
-        const expiresAt = new Date(issuedAt.getTime() + duration * 60000);
+        const expiresAt = new Date(issuedAt.getTime() + finalDuration * 60000);
         
-        console.log(`✅ [SESSION-GEN] Creating new session: ${sessionCode}, Duration: ${duration} minutes, Expires: ${expiresAt.toISOString()}`);
+        console.log(`✅ [SESSION-GEN] Creating new session: ${sessionCode}, Duration: ${finalDuration} minutes, Expires: ${expiresAt.toISOString()}`);
         
         // Create payload for QR code
         const qrPayload = { 
@@ -368,8 +465,8 @@ router.post('/generate-session', auth(['lecturer','admin']), async (req, res) =>
                 courseCode,
                 courseName,
                 lecturer: lecturerName,
-                durationMinutes: duration, // Use the actual duration used
-                requestedDuration: durationMinutes, // Show what was requested
+                durationMinutes: finalDuration, // Use the actual duration used
+                requestedDuration: durationValue, // Show what was requested
                 issuedAt: issuedAt.toISOString(),
                 expiresAt: expiresAt.toISOString(),
                 remainingSeconds: Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000))
