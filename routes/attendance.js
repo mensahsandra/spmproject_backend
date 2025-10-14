@@ -236,45 +236,53 @@ router.get('/active-session', auth(['lecturer','admin']), async (req, res) => {
 // Lecturer: generate a session code and QR image
 router.post('/generate-session', auth(['lecturer','admin']), async (req, res) => {
     try {
-        const { courseCode = 'BIT364', courseName = 'Entrepreneurship', lecturer, durationMinutes = 30 } = req.body || {};
+        const { courseCode = 'BIT364', courseName = 'Entrepreneurship', lecturer, durationMinutes } = req.body || {};
+        
+        // Parse duration with proper validation and default
+        let duration = 30; // Default 30 minutes
+        if (durationMinutes !== undefined && durationMinutes !== null) {
+            const parsedDuration = parseInt(durationMinutes, 10);
+            if (!isNaN(parsedDuration) && parsedDuration > 0 && parsedDuration <= 240) { // Max 4 hours
+                duration = parsedDuration;
+            }
+        }
+        
+        console.log(`⏰ [SESSION-GEN] Duration requested: ${durationMinutes}, Using: ${duration} minutes`);
         
         // Check if lecturer already has an active session
         const lecturerName = lecturer || req.user?.name || 'Prof. Anyimadu';
         const now = new Date();
         const usingDb = mongoose.connection?.readyState === 1;
         
-        // FORCE-CLOSE STALE SESSIONS: Clean up expired sessions before checking for active ones
+        console.log(`🔍 [SESSION-GEN] Checking for existing sessions for lecturer: ${req.user.id} (${lecturerName})`);
+        
+        // AGGRESSIVE CLEANUP: Remove ALL sessions for this lecturer (active and expired)
         if (usingDb) {
             try {
-                const expiredSessions = await AttendanceSession.deleteMany({
+                const allSessions = await AttendanceSession.deleteMany({
                     $or: [
                         { lecturerId: req.user.id },
                         { lecturer: lecturerName }
-                    ],
-                    expiresAt: { $lte: now }
+                    ]
                 });
                 
-                if (expiredSessions.deletedCount > 0) {
-                    console.log(`🧹 [CLEANUP] Removed ${expiredSessions.deletedCount} expired session(s) for lecturer ${req.user.id}`);
-                }
+                console.log(`🧹 [AGGRESSIVE-CLEANUP] Removed ${allSessions.deletedCount} session(s) for lecturer ${req.user.id}`);
             } catch (cleanupError) {
-                console.error('⚠️ [CLEANUP] Failed to clean expired sessions:', cleanupError.message);
+                console.error('⚠️ [CLEANUP] Failed to clean sessions:', cleanupError.message);
                 // Continue anyway - don't block session generation
             }
         } else {
-            // Clean up expired sessions from memory
+            // Clean up ALL sessions from memory for this lecturer
             const beforeCount = sessionsMem.length;
-            const filtered = sessionsMem.filter(s => 
-                !(s.lecturer === lecturerName && new Date(s.expiresAt) <= now)
-            );
+            const filtered = sessionsMem.filter(s => s.lecturer !== lecturerName);
             sessionsMem.length = 0;
             sessionsMem.push(...filtered);
             
-            if (beforeCount > filtered.length) {
-                console.log(`🧹 [CLEANUP] Removed ${beforeCount - filtered.length} expired session(s) from memory`);
-            }
+            const removedCount = beforeCount - filtered.length;
+            console.log(`🧹 [AGGRESSIVE-CLEANUP] Removed ${removedCount} session(s) from memory for lecturer ${lecturerName}`);
         }
         
+        // Double-check for any remaining active sessions (should be none after cleanup)
         let existingSession = null;
         if (usingDb) {
             existingSession = await AttendanceSession.findOne({
@@ -291,6 +299,7 @@ router.post('/generate-session', auth(['lecturer','admin']), async (req, res) =>
         }
         
         if (existingSession) {
+            console.error(`❌ [SESSION-GEN] Found existing session after cleanup! SessionCode: ${existingSession.sessionCode}`);
             const remainingSeconds = Math.max(0, Math.floor((new Date(existingSession.expiresAt).getTime() - now.getTime()) / 1000));
             return res.status(400).json({
                 ok: false,
@@ -305,7 +314,9 @@ router.post('/generate-session', auth(['lecturer','admin']), async (req, res) =>
         
         const sessionCode = randomCode(6) + '-' + randomCode(6);
         const issuedAt = new Date();
-        const expiresAt = new Date(issuedAt.getTime() + durationMinutes * 60000);
+        const expiresAt = new Date(issuedAt.getTime() + duration * 60000);
+        
+        console.log(`✅ [SESSION-GEN] Creating new session: ${sessionCode}, Duration: ${duration} minutes, Expires: ${expiresAt.toISOString()}`);
         
         // Create payload for QR code
         const qrPayload = { 
@@ -357,7 +368,8 @@ router.post('/generate-session', auth(['lecturer','admin']), async (req, res) =>
                 courseCode,
                 courseName,
                 lecturer: lecturerName,
-                durationMinutes: parseInt(durationMinutes),
+                durationMinutes: duration, // Use the actual duration used
+                requestedDuration: durationMinutes, // Show what was requested
                 issuedAt: issuedAt.toISOString(),
                 expiresAt: expiresAt.toISOString(),
                 remainingSeconds: Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000))
@@ -1837,7 +1849,7 @@ router.delete('/sessions/active', auth(['lecturer', 'admin']), async (req, res) 
         console.log(`🧹 [FORCE-CLEANUP] Cancelling all active sessions for lecturer ${req.user.id}`);
         
         if (usingDb) {
-            // Delete all active sessions for this lecturer
+            // Delete all sessions for this lecturer (not just active ones)
             const deletedSessions = await AttendanceSession.deleteMany({
                 $or: [
                     { lecturerId: req.user.id },
@@ -1845,11 +1857,11 @@ router.delete('/sessions/active', auth(['lecturer', 'admin']), async (req, res) 
                 ]
             });
             
-            console.log(`✅ [FORCE-CLEANUP] Cancelled ${deletedSessions.deletedCount} active sessions from database`);
+            console.log(`✅ [FORCE-CLEANUP] Cancelled ${deletedSessions.deletedCount} sessions from database`);
             
             res.json({
                 ok: true,
-                message: `Successfully cancelled ${deletedSessions.deletedCount} active sessions`,
+                message: `Successfully cancelled ${deletedSessions.deletedCount} sessions`,
                 deletedSessions: deletedSessions.deletedCount,
                 cleanupAt: new Date().toISOString()
             });
@@ -1862,11 +1874,11 @@ router.delete('/sessions/active', auth(['lecturer', 'admin']), async (req, res) 
             sessionsMem.push(...filteredSessions);
             const removedSessions = beforeCount - filteredSessions.length;
             
-            console.log(`✅ [FORCE-CLEANUP] Cancelled ${removedSessions} active sessions from memory`);
+            console.log(`✅ [FORCE-CLEANUP] Cancelled ${removedSessions} sessions from memory`);
             
             res.json({
                 ok: true,
-                message: `Successfully cancelled ${removedSessions} active sessions (memory)`,
+                message: `Successfully cancelled ${removedSessions} sessions (memory)`,
                 deletedSessions: removedSessions,
                 cleanupAt: new Date().toISOString()
             });
@@ -1876,7 +1888,55 @@ router.delete('/sessions/active', auth(['lecturer', 'admin']), async (req, res) 
         console.error('❌ [FORCE-CLEANUP] Error during force cleanup:', error);
         res.status(500).json({
             ok: false,
-            message: 'Failed to cleanup active sessions',
+            message: 'Failed to cleanup sessions',
+            error: error.message
+        });
+    }
+});
+
+// @route   POST /api/attendance/sessions/force-clear
+// @desc    Emergency endpoint to clear ALL sessions for debugging
+// @access  Private (Lecturer, Admin)
+router.post('/sessions/force-clear', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        console.log(`🚨 [EMERGENCY-CLEAR] Force clearing ALL sessions for debugging`);
+        
+        if (usingDb) {
+            // Delete ALL sessions in the database
+            const deletedSessions = await AttendanceSession.deleteMany({});
+            console.log(`🚨 [EMERGENCY-CLEAR] Deleted ${deletedSessions.deletedCount} sessions from database`);
+            
+            res.json({
+                ok: true,
+                message: `Emergency clear: Deleted ${deletedSessions.deletedCount} sessions from database`,
+                deletedSessions: deletedSessions.deletedCount,
+                clearType: 'database',
+                clearedAt: new Date().toISOString()
+            });
+            
+        } else {
+            // Clear all sessions from memory
+            const beforeCount = sessionsMem.length;
+            sessionsMem.length = 0;
+            
+            console.log(`🚨 [EMERGENCY-CLEAR] Cleared ${beforeCount} sessions from memory`);
+            
+            res.json({
+                ok: true,
+                message: `Emergency clear: Cleared ${beforeCount} sessions from memory`,
+                deletedSessions: beforeCount,
+                clearType: 'memory',
+                clearedAt: new Date().toISOString()
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ [EMERGENCY-CLEAR] Error during emergency clear:', error);
+        res.status(500).json({
+            ok: false,
+            message: 'Failed to emergency clear sessions',
             error: error.message
         });
     }
