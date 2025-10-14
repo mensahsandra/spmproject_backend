@@ -131,6 +131,8 @@ app.use("/api/grades", require("./routes/grades"));
 app.use("/api/grades", require("./routes/grades_v2"));
 // Assessment routes
 app.use("/api/assessments", require("./routes/assessments"));
+// Students routes for performance tracking
+app.use("/api/students", require("./routes/students"));
 // Course management routes
 app.use("/api/courses", require("./routes/courses"));
 // Quiz management routes (lecturer only)

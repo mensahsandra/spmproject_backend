@@ -1,10 +1,10 @@
 // Detailed diagnosis of frontend-backend communication issue
 async function diagnoseFrontendIssue() {
     try {
-        console.log('🔍 DETAILED FRONTEND-BACKEND DIAGNOSIS...\n');
+        console.log(' DETAILED FRONTEND-BACKEND DIAGNOSIS...\n');
         
         // Test 1: Check if the frontend is calling the right backend
-        console.log('1️⃣ TESTING BACKEND ENDPOINTS...');
+        console.log('1️ TESTING BACKEND ENDPOINTS...');
         
         // Test health endpoint
         const healthResponse = await fetch('https://spmproject-backend.vercel.app/api/health');
@@ -119,7 +119,7 @@ async function diagnoseFrontendIssue() {
             console.log(`${key}: ${value}`);
         }
         
-        console.log('\n🎯 DIAGNOSIS SUMMARY:');
+        console.log('\n DIAGNOSIS SUMMARY:');
         console.log('Based on the "Invalid token: No lecturer ID found" error:');
         console.log('1. Frontend is not finding lecturerId in the response');
         console.log('2. Token might not be stored/sent correctly');
@@ -127,7 +127,7 @@ async function diagnoseFrontendIssue() {
         console.log('4. Response format mismatch between frontend expectations and backend');
         
     } catch (error) {
-        console.error('❌ Diagnosis error:', error.message);
+        console.error(' Diagnosis error:', error.message);
     }
 }
 

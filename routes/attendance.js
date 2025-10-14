@@ -1742,4 +1742,144 @@ router.delete('/reset/:lecturerId', auth(['lecturer', 'admin']), async (req, res
     }
 });
 
+// @route   DELETE /api/attendance/session/:sessionCode
+// @desc    Cancel/delete a specific attendance session
+// @access  Private (Lecturer, Admin)
+router.delete('/session/:sessionCode', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const { sessionCode } = req.params;
+        const lecturerName = req.user?.name || 'Unknown Lecturer';
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        console.log(`🗑️ [CANCEL-SESSION] Cancelling session ${sessionCode} for lecturer ${req.user.id}`);
+        
+        if (usingDb) {
+            // Find and delete the session from database
+            const deletedSession = await AttendanceSession.findOneAndDelete({
+                sessionCode: sessionCode,
+                $or: [
+                    { lecturerId: req.user.id },
+                    { lecturer: lecturerName }
+                ]
+            });
+            
+            if (!deletedSession) {
+                return res.status(404).json({
+                    ok: false,
+                    message: 'Session not found or you do not have permission to cancel it'
+                });
+            }
+            
+            // Also delete any attendance logs for this session
+            const deletedLogs = await AttendanceLog.deleteMany({ sessionCode: sessionCode });
+            
+            console.log(`✅ [CANCEL-SESSION] Successfully cancelled session ${sessionCode}, removed ${deletedLogs.deletedCount} attendance logs`);
+            
+            res.json({
+                ok: true,
+                message: 'Session cancelled successfully',
+                sessionCode: sessionCode,
+                deletedLogs: deletedLogs.deletedCount,
+                cancelledAt: new Date().toISOString()
+            });
+            
+        } else {
+            // Remove from memory store
+            const sessionIndex = sessionsMem.findIndex(s => 
+                s.sessionCode === sessionCode && s.lecturer === lecturerName
+            );
+            
+            if (sessionIndex === -1) {
+                return res.status(404).json({
+                    ok: false,
+                    message: 'Session not found or you do not have permission to cancel it'
+                });
+            }
+            
+            sessionsMem.splice(sessionIndex, 1);
+            
+            // Remove attendance logs from memory
+            const initialLogCount = attendanceLogsMem.length;
+            const filteredLogs = attendanceLogsMem.filter(log => log.sessionCode !== sessionCode);
+            attendanceLogsMem.length = 0;
+            attendanceLogsMem.push(...filteredLogs);
+            const removedLogs = initialLogCount - filteredLogs.length;
+            
+            console.log(`✅ [CANCEL-SESSION] Successfully cancelled session ${sessionCode} from memory, removed ${removedLogs} attendance logs`);
+            
+            res.json({
+                ok: true,
+                message: 'Session cancelled successfully (memory)',
+                sessionCode: sessionCode,
+                deletedLogs: removedLogs,
+                cancelledAt: new Date().toISOString()
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ [CANCEL-SESSION] Error cancelling session:', error);
+        res.status(500).json({
+            ok: false,
+            message: 'Failed to cancel session',
+            error: error.message
+        });
+    }
+});
+
+// @route   DELETE /api/attendance/sessions/active
+// @desc    Cancel all active sessions for current lecturer (force cleanup)
+// @access  Private (Lecturer, Admin)
+router.delete('/sessions/active', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const lecturerName = req.user?.name || 'Unknown Lecturer';
+        const usingDb = mongoose.connection?.readyState === 1;
+        
+        console.log(`🧹 [FORCE-CLEANUP] Cancelling all active sessions for lecturer ${req.user.id}`);
+        
+        if (usingDb) {
+            // Delete all active sessions for this lecturer
+            const deletedSessions = await AttendanceSession.deleteMany({
+                $or: [
+                    { lecturerId: req.user.id },
+                    { lecturer: lecturerName }
+                ]
+            });
+            
+            console.log(`✅ [FORCE-CLEANUP] Cancelled ${deletedSessions.deletedCount} active sessions from database`);
+            
+            res.json({
+                ok: true,
+                message: `Successfully cancelled ${deletedSessions.deletedCount} active sessions`,
+                deletedSessions: deletedSessions.deletedCount,
+                cleanupAt: new Date().toISOString()
+            });
+            
+        } else {
+            // Remove from memory store
+            const beforeCount = sessionsMem.length;
+            const filteredSessions = sessionsMem.filter(s => s.lecturer !== lecturerName);
+            sessionsMem.length = 0;
+            sessionsMem.push(...filteredSessions);
+            const removedSessions = beforeCount - filteredSessions.length;
+            
+            console.log(`✅ [FORCE-CLEANUP] Cancelled ${removedSessions} active sessions from memory`);
+            
+            res.json({
+                ok: true,
+                message: `Successfully cancelled ${removedSessions} active sessions (memory)`,
+                deletedSessions: removedSessions,
+                cleanupAt: new Date().toISOString()
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ [FORCE-CLEANUP] Error during force cleanup:', error);
+        res.status(500).json({
+            ok: false,
+            message: 'Failed to cleanup active sessions',
+            error: error.message
+        });
+    }
+});
+
 module.exports = router;

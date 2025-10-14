@@ -886,4 +886,151 @@ function calculateGPA(courses) {
     return totalCredits > 0 ? (totalPoints / totalCredits).toFixed(2) : 0;
 }
 
+// @route   DELETE /api/grades/clear
+// @desc    Clear all grades for a specific course (reset to empty state)
+// @access  Private (Lecturer, Admin)
+router.delete('/clear', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const { courseCode } = req.query;
+        
+        if (!courseCode) {
+            return res.status(400).json({
+                success: false,
+                message: 'courseCode is required'
+            });
+        }
+
+        console.log(`🧹 [GRADES] Clearing all grades for course: ${courseCode}`);
+
+        // Remove grades from in-memory store
+        const beforeCount = gradeStore.length;
+        const filteredGrades = gradeStore.filter(grade => grade.courseCode !== courseCode);
+        gradeStore.length = 0;
+        gradeStore.push(...filteredGrades);
+        const removedCount = beforeCount - filteredGrades.length;
+
+        // Try to remove from database as well
+        let dbRemovedCount = 0;
+        try {
+            const Grade = require('../models/Grade');
+            const deleteResult = await Grade.deleteMany({ courseCode: courseCode });
+            dbRemovedCount = deleteResult.deletedCount;
+        } catch (dbError) {
+            console.warn('❌ [GRADES] Could not clear grades from database:', dbError.message);
+        }
+
+        console.log(`✅ [GRADES] Cleared ${removedCount} grades from memory, ${dbRemovedCount} from database for course ${courseCode}`);
+
+        res.json({
+            success: true,
+            message: `Successfully cleared all grades for course ${courseCode}`,
+            courseCode: courseCode,
+            clearedFromMemory: removedCount,
+            clearedFromDatabase: dbRemovedCount,
+            clearedAt: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('❌ [GRADES] Error clearing grades:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to clear grades',
+            error: error.message
+        });
+    }
+});
+
+// @route   GET /api/grades/sample-empty
+// @desc    Get sample students with empty grades for testing UI
+// @access  Private (Lecturer, Admin)
+router.get('/sample-empty', auth(['lecturer', 'admin']), async (req, res) => {
+    try {
+        const { courseCode = 'BIT301' } = req.query;
+        
+        console.log(`📋 [GRADES] Providing sample empty grades for course: ${courseCode}`);
+
+        // Get course mapping for full course name
+        let mapCoursesToFullDetails;
+        try {
+            mapCoursesToFullDetails = require('../config/courseMapping').mapCoursesToFullDetails;
+        } catch (error) {
+            mapCoursesToFullDetails = (courses) => courses.map(c => ({ code: c, fullName: c }));
+        }
+
+        const courseDetails = mapCoursesToFullDetails([courseCode])[0] || {
+            code: courseCode,
+            fullName: courseCode
+        };
+
+        // Sample students with completely empty grades
+        const sampleStudents = [
+            { 
+                studentId: '1234568', 
+                fullName: 'John Kwaku Doe', 
+                assessment: null, 
+                midsem: null, 
+                endOfSemester: null,
+                totalGrades: 0,
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                status: 'enrolled'
+            },
+            { 
+                studentId: '1234456', 
+                fullName: 'Saaed Hawa', 
+                assessment: null, 
+                midsem: null, 
+                endOfSemester: null,
+                totalGrades: 0,
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                status: 'enrolled'
+            },
+            { 
+                studentId: '1233456', 
+                fullName: 'Kwarteng Samuel', 
+                assessment: null, 
+                midsem: null, 
+                endOfSemester: null,
+                totalGrades: 0,
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                status: 'enrolled'
+            },
+            { 
+                studentId: '1234557', 
+                fullName: 'Nashiru Alhassan', 
+                assessment: null, 
+                midsem: null, 
+                endOfSemester: null,
+                totalGrades: 0,
+                academicYear: '2024/2025',
+                semester: 'Semester 1',
+                status: 'enrolled'
+            }
+        ];
+
+        res.json({
+            success: true,
+            courseCode: courseCode,
+            courseName: courseDetails.fullName,
+            students: sampleStudents,
+            totalStudents: sampleStudents.length,
+            note: 'All grades are empty - ready for new grading',
+            metadata: {
+                assessmentTypes: ['Assessment', 'Midsem', 'End of Semester'],
+                maxScores: { assessment: 100, midsem: 100, endOfSemester: 100 }
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ [GRADES] Error providing sample empty grades:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to provide sample empty grades',
+            error: error.message
+        });
+    }
+});
+
 module.exports = router;
