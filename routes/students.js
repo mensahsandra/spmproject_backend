@@ -89,22 +89,19 @@ router.get('/performance', auth(['lecturer', 'admin']), async (req, res) => {
                 ...(academicYear && { academicYear: academicYear })
             }).lean();
 
+            console.log(`📊 [STUDENTS] Found ${existingGrades.length} existing grades in database`);
+
             // Map existing grades to students if any exist
             sampleStudents.forEach(student => {
-                const studentGrades = existingGrades.filter(g => g.studentId === student.studentId);
+                const studentGrade = existingGrades.find(g => g.studentId === student.studentId);
                 
-                studentGrades.forEach(grade => {
-                    if (grade.assessmentType === 'Class Assessment') {
-                        student.classAssessment = grade.score;
-                        student.dateEntered = grade.dateEntered || grade.createdAt;
-                    } else if (grade.assessmentType === 'Mid Semester') {
-                        student.midSemester = grade.score;
-                        student.dateEntered = grade.dateEntered || grade.createdAt;
-                    } else if (grade.assessmentType === 'End of Semester') {
-                        student.endOfSemester = grade.score;
-                        student.dateEntered = grade.dateEntered || grade.createdAt;
-                    }
-                });
+                if (studentGrade) {
+                    student.classAssessment = studentGrade.classAssessment;
+                    student.midSemester = studentGrade.midSemester;
+                    student.endOfSemester = studentGrade.endOfSemester;
+                    student.dateEntered = studentGrade.dateEntered || studentGrade.createdAt;
+                    console.log(`   - ${student.fullName}: Class=${student.classAssessment}, Mid=${student.midSemester}, End=${student.endOfSemester}`);
+                }
             });
         } catch (dbError) {
             console.warn('❌ [STUDENTS] Could not fetch grades from database:', dbError.message);
@@ -276,18 +273,45 @@ router.put('/:studentId/grades', auth(['lecturer', 'admin']), async (req, res) =
 
         // Try to save to database if Grade model is available
         try {
-            for (const gradeData of gradeUpdates) {
-                await Grade.findOneAndUpdate(
-                    { 
-                        studentId: gradeData.studentId, 
-                        courseCode: gradeData.courseCode, 
-                        assessmentType: gradeData.assessmentType 
-                    },
-                    gradeData,
-                    { upsert: true, new: true }
-                );
+            // Find existing grade record for this student and course
+            const existingGrade = await Grade.findOne({
+                studentId: studentId,
+                courseCode: courseCode
+            });
+
+            if (existingGrade) {
+                // Update existing record
+                const updateData = {
+                    ...(classAssessment !== null && classAssessment !== undefined && { classAssessment }),
+                    ...(midSemester !== null && midSemester !== undefined && { midSemester }),
+                    ...(endOfSemester !== null && endOfSemester !== undefined && { endOfSemester }),
+                    dateEntered: currentDate,
+                    academicYear: academicYear || '2024/2025'
+                };
+
+                await Grade.findByIdAndUpdate(existingGrade._id, updateData);
+                console.log(`✅ [STUDENTS] Updated existing grade record for student ${studentId}`);
+            } else {
+                // Create new record
+                const newGrade = new Grade({
+                    studentId,
+                    studentName: 'Student Name', // You might want to fetch this from User model
+                    courseCode,
+                    courseName: 'Course Name',
+                    classAssessment: classAssessment || null,
+                    midSemester: midSemester || null,
+                    endOfSemester: endOfSemester || null,
+                    academicYear: academicYear || '2024/2025',
+                    semester: 'Semester 1',
+                    block: 'Block A',
+                    dateEntered: currentDate
+                });
+
+                await newGrade.save();
+                console.log(`✅ [STUDENTS] Created new grade record for student ${studentId}`);
             }
-            console.log(`✅ [STUDENTS] Successfully updated ${gradeUpdates.length} grades in database`);
+
+            console.log(`✅ [STUDENTS] Successfully updated grades in database`);
         } catch (dbError) {
             console.warn('❌ [STUDENTS] Could not save to database:', dbError.message);
             // Continue without database save
@@ -296,7 +320,11 @@ router.put('/:studentId/grades', auth(['lecturer', 'admin']), async (req, res) =
         res.json({
             success: true,
             message: `Successfully updated grades for student ${studentId}`,
-            updatedGrades: gradeUpdates.length,
+            updatedFields: {
+                ...(classAssessment !== null && classAssessment !== undefined && { classAssessment }),
+                ...(midSemester !== null && midSemester !== undefined && { midSemester }),
+                ...(endOfSemester !== null && endOfSemester !== undefined && { endOfSemester })
+            },
             studentId,
             courseCode
         });
