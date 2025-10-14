@@ -301,6 +301,124 @@ class NotificationService {
   }
 
   /**
+   * Notify students when a new assessment is created
+   */
+  static async notifyAssessmentCreated(assessment, lecturerId) {
+    try {
+      console.log(`📢 Creating assessment notifications for course: ${assessment.courseCode}`);
+      
+      // Get students enrolled in this course
+      const students = await User.find({ 
+        role: 'student',
+        courses: assessment.courseCode 
+      }).select('_id name');
+
+      console.log(`👥 Found ${students.length} students enrolled in ${assessment.courseCode}`);
+      
+      const notifications = [];
+
+      // Notify each enrolled student
+      for (const student of students) {
+        const studentNotification = await this.createNotification({
+          recipientId: student._id,
+          recipientRole: 'student',
+          type: 'assessment_created',
+          title: 'New Assessment Available',
+          message: `New assessment "${assessment.title}" has been created for ${assessment.courseCode}`,
+          relatedQuizId: assessment._id,
+          relatedCourseCode: assessment.courseCode,
+          metadata: {
+            assessmentTitle: assessment.title,
+            courseCode: assessment.courseCode,
+            courseName: assessment.courseName,
+            lecturerName: assessment.lecturer,
+            createdAt: assessment.createdAt,
+            type: assessment.type || 'assessment',
+            hasDeadline: !!assessment.deadline
+          },
+          actionUrl: `/student/assessment`,
+          actionLabel: 'View Assessment',
+          priority: 'high',
+          expiresAt: assessment.deadline ? new Date(assessment.deadline) : null
+        });
+        notifications.push(studentNotification);
+      }
+
+      // Notify lecturer (confirmation)
+      if (lecturerId) {
+        const lecturerNotification = await this.createNotification({
+          recipientId: lecturerId,
+          recipientRole: 'lecturer',
+          type: 'assessment_created',
+          title: 'Assessment Created Successfully',
+          message: `Assessment "${assessment.title}" has been created and students have been notified`,
+          relatedQuizId: assessment._id,
+          relatedCourseCode: assessment.courseCode,
+          metadata: {
+            assessmentTitle: assessment.title,
+            courseCode: assessment.courseCode,
+            studentsNotified: students.length,
+            createdAt: assessment.createdAt
+          },
+          actionUrl: `/lecturer/assessment`,
+          actionLabel: 'View Assessment',
+          priority: 'normal'
+        });
+        notifications.push(lecturerNotification);
+      }
+
+      console.log(`✅ Created ${notifications.length} assessment notifications`);
+      return notifications;
+    } catch (error) {
+      console.error('❌ Failed to notify about assessment creation:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Notify lecturer when student submits assessment
+   */
+  static async notifyAssessmentSubmitted(assessment, submission, studentId, lecturerId) {
+    try {
+      const student = await User.findById(studentId).select('name studentId');
+      
+      if (!lecturerId) {
+        console.warn('⚠️ No lecturerId provided for assessment submission notification');
+        return null;
+      }
+
+      const notification = await this.createNotification({
+        recipientId: lecturerId,
+        recipientRole: 'lecturer',
+        type: 'assessment_submitted',
+        title: 'Assessment Submitted',
+        message: `${student?.name || 'Student'} (${student?.studentId || studentId}) submitted "${assessment.title}"`,
+        relatedQuizId: assessment._id,
+        relatedSubmissionId: submission._id,
+        relatedCourseCode: assessment.courseCode,
+        metadata: {
+          studentId: studentId,
+          studentName: student?.name,
+          studentIdNumber: student?.studentId,
+          assessmentTitle: assessment.title,
+          courseCode: assessment.courseCode,
+          submittedAt: submission.submittedAt,
+          submissionId: submission._id
+        },
+        actionUrl: `/lecturer/assessment`,
+        actionLabel: 'Review Submission',
+        priority: 'high'
+      });
+
+      console.log(`✅ Assessment submission notification sent to lecturer`);
+      return notification;
+    } catch (error) {
+      console.error('❌ Failed to notify lecturer about assessment submission:', error.message);
+      throw error;
+    }
+  }
+
+  /**
    * Mark notification as read
    */
   static async markAsRead(notificationId, userId) {

@@ -2,6 +2,7 @@ const Assessment = require('../models/Assessment');
 const AssessmentSubmission = require('../models/AssessmentSubmission');
 const Course = require('../models/Course');
 const User = require('../models/User');
+const NotificationService = require('./notificationService');
 const { AssessmentTypes, AssessmentTypeLabels } = require('../constants/assessmentTypes');
 
 function resolveAssessmentStatus(assessment) {
@@ -50,6 +51,16 @@ async function createAssessment({ body, files, lecturer }) {
     questions: parsedQuestions,
     attachments
   });
+
+  // Send notifications to students and lecturer
+  try {
+    console.log(`📢 Sending assessment creation notifications for: ${assessment.title}`);
+    await NotificationService.notifyAssessmentCreated(assessment, lecturer._id);
+    console.log(`✅ Assessment notifications sent successfully`);
+  } catch (notificationError) {
+    console.error('❌ Failed to send assessment notifications:', notificationError.message);
+    // Don't fail the assessment creation if notifications fail
+  }
 
   return assessment;
 }

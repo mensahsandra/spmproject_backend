@@ -145,6 +145,9 @@ app.use("/api/results", require("./routes/results"));
 // Admin routes (temporary for database seeding)
 app.use("/api/admin", require("./routes/admin"));
 
+// System routes (health, status, demo mode control)
+app.use("/api/system", require("./routes/system"));
+
 // Notification routes
 app.use("/api/notifications", require("./routes/notifications"));
 
